@@ -53,7 +53,8 @@ class SyncManagerTest {
         every { isSyncEnabledPref.get() } returns true
         every { serverUrlPref.get() } returns "https://sync.mihon.app"
         every { roomIdPref.get() } returns "room123"
-        every { encryptionKeyPref.get() } returns "c2VjcmV0LWtleS0zMi1ieXRlcy1sb25nISEhISE="
+        val validKey = eu.kanade.tachiyomi.sync.crypto.CryptoUtil.generateSecretKey()
+        every { encryptionKeyPref.get() } returns validKey
         every { lastSyncTimestampPref.get() } returns 0L
         every { lastSyncTimestampPref.set(any()) } returns Unit
         every { deviceIdPref.get() } returns "device1"
@@ -131,7 +132,7 @@ class SyncManagerTest {
 
     @Test
     fun `merges snapshot first when pullResponse contains a snapshot`() = runBlocking {
-        val key = "c2VjcmV0LWtleS0zMi1ieXRlcy1sb25nISEhISE="
+        val key = encryptionKeyPref.get()
         val encryptedSnapshot = eu.kanade.tachiyomi.sync.crypto.CryptoUtil.encryptString("{}", key)
 
         coEvery { apiClient.pullUpdates(any()) } returns SyncUpdatesResponse(
