@@ -38,6 +38,8 @@ class SyncManager(
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val syncMutex = Mutex()
     private var debounceJob: Job? = null
+    var lastAutoSyncTimestamp: Long = 0L
+        internal set
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -59,9 +61,18 @@ class SyncManager(
     fun triggerSync(debounceDelayMs: Long = 1000L) {
         if (!isSyncEnabled()) return
 
+        val now = System.currentTimeMillis()
+        if (now - lastAutoSyncTimestamp < AUTO_SYNC_COOLDOWN_MS) {
+            return
+        }
+
         debounceJob?.cancel()
         debounceJob = scope.launch {
             delay(debounceDelayMs)
+            val currentTime = System.currentTimeMillis()
+            if (currentTime - lastAutoSyncTimestamp < AUTO_SYNC_COOLDOWN_MS) {
+                return@launch
+            }
             syncNow()
         }
     }
@@ -77,8 +88,12 @@ class SyncManager(
     suspend fun syncNow(force: Boolean = false): Boolean {
         if (!force && !isSyncEnabled()) return false
         if (!syncPreferences.isConfigured()) return false
+        if (!force && System.currentTimeMillis() - lastAutoSyncTimestamp < AUTO_SYNC_COOLDOWN_MS) {
+            return false
+        }
 
         return syncMutex.withLock {
+            lastAutoSyncTimestamp = System.currentTimeMillis()
             try {
                 val encryptionKey = syncPreferences.encryptionKey.get()
                 val lastSyncTime = syncPreferences.lastSyncTimestamp.get()
@@ -138,5 +153,9 @@ class SyncManager(
                 false
             }
         }
+    }
+
+    companion object {
+        const val AUTO_SYNC_COOLDOWN_MS = 60_000L
     }
 }

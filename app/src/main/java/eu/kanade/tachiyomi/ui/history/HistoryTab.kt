@@ -8,6 +8,8 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cafe.adriel.voyager.navigator.LocalNavigator
@@ -30,6 +32,8 @@ import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.launch
+import mihon.app.di.appGraph
 import mihon.feature.migration.dialog.MigrateMangaDialog
 import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.domain.chapter.model.Chapter
@@ -64,6 +68,8 @@ data object HistoryTab : Tab {
         val context = LocalContext.current
         val viewModel = metroViewModel<HistoryViewModel>()
         val state by viewModel.state.collectAsStateWithLifecycle()
+        val scope = rememberCoroutineScope()
+        val syncManager = remember { context.appGraph.syncManager }
 
         HistoryScreen(
             state = state,
@@ -73,6 +79,17 @@ data object HistoryTab : Tab {
             onClickResume = viewModel::getNextChapterForManga,
             onDialogChange = viewModel::setDialog,
             onClickFavorite = viewModel::addFavorite,
+            onClickSync = {
+                scope.launch {
+                    val success = syncManager.syncNow(force = true)
+                    val message = if (success) {
+                        context.stringResource(MR.strings.sync_success)
+                    } else {
+                        context.stringResource(MR.strings.sync_failed)
+                    }
+                    snackbarHostState.showSnackbar(message)
+                }
+            },
         )
 
         val onDismissRequest = { viewModel.setDialog(null) }

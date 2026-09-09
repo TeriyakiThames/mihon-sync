@@ -20,6 +20,7 @@ import eu.kanade.tachiyomi.ui.history.HistoryViewModel
 import kotlinx.datetime.LocalDate
 import mihon.icons.materialsymbols.MaterialSymbols
 import mihon.icons.materialsymbols.rounded.DeleteSweep
+import mihon.icons.materialsymbols.rounded.Sync
 import tachiyomi.domain.history.model.HistoryWithRelations
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.FastScrollLazyColumn
@@ -38,6 +39,7 @@ fun HistoryScreen(
     onClickResume: (mangaId: Long, chapterId: Long) -> Unit,
     onClickFavorite: (mangaId: Long) -> Unit,
     onDialogChange: (HistoryViewModel.Dialog?) -> Unit,
+    onClickSync: () -> Unit,
 ) {
     Scaffold(
         topBar = { scrollBehavior ->
@@ -45,6 +47,17 @@ fun HistoryScreen(
                 titleContent = { AppBarTitle(stringResource(MR.strings.history)) },
                 searchQuery = state.searchQuery,
                 onChangeSearchQuery = onSearchQueryChange,
+                preActions = {
+                    AppBarActions(
+                        listOf(
+                            AppBar.Action(
+                                title = stringResource(MR.strings.pref_sync_now),
+                                icon = MaterialSymbols.Rounded.Sync,
+                                onClick = onClickSync,
+                            ),
+                        ),
+                    )
+                },
                 actions = {
                     AppBarActions(
                         listOf(
@@ -155,6 +168,7 @@ internal fun HistoryScreenPreviews(
             onClickResume = { _, _ -> run {} },
             onDialogChange = {},
             onClickFavorite = {},
+            onClickSync = {},
         )
     }
 }

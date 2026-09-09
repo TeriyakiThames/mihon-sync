@@ -1,0 +1,246 @@
+package eu.kanade.tachiyomi.sync
+
+import app.cash.sqldelight.Query
+import app.cash.sqldelight.SuspendingTransactionWithoutReturn
+import eu.kanade.tachiyomi.source.model.UpdateStrategy
+import eu.kanade.tachiyomi.sync.data.ChapterSyncRecord
+import eu.kanade.tachiyomi.sync.data.HistorySyncRecord
+import eu.kanade.tachiyomi.sync.data.MangaSyncRecord
+import eu.kanade.tachiyomi.sync.data.SyncMerger
+import eu.kanade.tachiyomi.sync.data.SyncPayload
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.every
+import io.mockk.mockk
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonObject
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.BeforeEach
+import org.junit.jupiter.api.Test
+import tachiyomi.data.Chapters
+import tachiyomi.data.ChaptersQueries
+import tachiyomi.data.Database
+import tachiyomi.data.HistoryQueries
+import tachiyomi.data.Mangas
+import tachiyomi.data.MangasQueries
+import tachiyomi.data.SyncQueries
+import java.util.Date
+
+class SyncMergerTest {
+
+    private lateinit var database: Database
+    private lateinit var syncQueries: SyncQueries
+    private lateinit var chaptersQueries: ChaptersQueries
+    private lateinit var historyQueries: HistoryQueries
+    private lateinit var mangasQueries: MangasQueries
+    private lateinit var merger: SyncMerger
+
+    @BeforeEach
+    fun setUp() {
+        database = mockk()
+        syncQueries = mockk(relaxed = true)
+        chaptersQueries = mockk(relaxed = true)
+        historyQueries = mockk(relaxed = true)
+        mangasQueries = mockk(relaxed = true)
+
+        every { database.syncQueries } returns syncQueries
+        every { database.chaptersQueries } returns chaptersQueries
+        every { database.historyQueries } returns historyQueries
+        every { database.mangasQueries } returns mangasQueries
+
+        coEvery { database.transaction(any(), any()) } coAnswers {
+            val block = secondArg<suspend SuspendingTransactionWithoutReturn.() -> Unit>()
+            val tx = mockk<SuspendingTransactionWithoutReturn>(relaxed = true)
+            tx.block()
+        }
+
+        merger = SyncMerger(database)
+    }
+
+    @Test
+    fun `merge wraps operations in database transaction and resets is_syncing flags`() = runBlocking {
+        var transactionExecuted = false
+        coEvery { database.transaction(any(), any()) } coAnswers {
+            transactionExecuted = true
+            val block = secondArg<suspend SuspendingTransactionWithoutReturn.() -> Unit>()
+            val tx = mockk<SuspendingTransactionWithoutReturn>(relaxed = true)
+            tx.block()
+        }
+
+        val emptyPayload = SyncPayload(
+            chapters = emptyList(),
+            history = emptyList(),
+            mangas = emptyList(),
+        )
+
+        merger.merge(emptyPayload)
+
+        assertTrue(transactionExecuted, "merge operations must be executed inside database.transaction")
+        coVerify(exactly = 1) { syncQueries.resetAllChapterIsSyncing() }
+        coVerify(exactly = 1) { syncQueries.resetAllMangaIsSyncing() }
+    }
+
+    @Test
+    fun `merge applies updates using synchronous query execution within transaction`() = runBlocking {
+        val localManga = Mangas(
+            _id = 1L,
+            source = 100L,
+            url = "/manga/1",
+            artist = null,
+            author = null,
+            description = null,
+            genre = null,
+            title = "Test Manga",
+            status = 1L,
+            thumbnail_url = null,
+            favorite = false,
+            last_update = null,
+            next_update = null,
+            initialized = true,
+            viewer = 0L,
+            chapter_flags = 0L,
+            cover_last_modified = 0L,
+            date_added = 0L,
+            update_strategy = UpdateStrategy.ALWAYS_UPDATE,
+            calculate_interval = 0L,
+            last_modified_at = 1000L,
+            favorite_modified_at = 1000L,
+            version = 1L,
+            is_syncing = 0L,
+            notes = "",
+            memo = JsonObject(emptyMap()),
+        )
+
+        val localChapter = Chapters(
+            _id = 10L,
+            manga_id = 1L,
+            url = "/chapter/1",
+            name = "Chapter 1",
+            scanlator = null,
+            read = false,
+            bookmark = false,
+            last_page_read = 5L,
+            chapter_number = 1.0,
+            source_order = 0L,
+            date_fetch = 0L,
+            date_upload = 0L,
+            last_modified_at = 1000L,
+            version = 1L,
+            is_syncing = 0L,
+            memo = JsonObject(emptyMap()),
+        )
+
+        val mangaQuery = mockk<Query<Mangas>>()
+        every { mangaQuery.executeAsOneOrNull() } returns localManga
+        every { syncQueries.getMangaBySourceAndUrl(100L, "/manga/1") } returns mangaQuery
+
+        val chapterQuery = mockk<Query<Chapters>>()
+        every { chapterQuery.executeAsOneOrNull() } returns localChapter
+        every { syncQueries.getChapterByMangaIdAndUrl(1L, "/chapter/1") } returns chapterQuery
+
+        val historyQuery = mockk<Query<tachiyomi.data.History>>()
+        every { historyQuery.executeAsOneOrNull() } returns null
+        every { historyQueries.getHistoryByChapterUrlAndMangaId(any(), any()) } returns historyQuery
+
+        val payload = SyncPayload(
+            chapters = listOf(
+                ChapterSyncRecord(
+                    mangaSource = 100L,
+                    mangaUrl = "/manga/1",
+                    chapterUrl = "/chapter/1",
+                    read = true,
+                    bookmark = true,
+                    lastPageRead = 10L,
+                    version = 2L,
+                    lastModifiedAt = 2000L,
+                )
+            ),
+            history = listOf(
+                HistorySyncRecord(
+                    mangaSource = 100L,
+                    mangaUrl = "/manga/1",
+                    chapterUrl = "/chapter/1",
+                    lastRead = 2000000L,
+                    timeRead = 500L,
+                )
+            ),
+            mangas = listOf(
+                MangaSyncRecord(
+                    source = 100L,
+                    url = "/manga/1",
+                    title = "Test Manga",
+                    favorite = true,
+                    lastModifiedAt = 2000L,
+                    favoriteModifiedAt = 2000L,
+                )
+            ),
+        )
+
+        merger.merge(payload)
+
+        // Verify synchronous query executions were invoked
+        io.mockk.verify(atLeast = 1) { mangaQuery.executeAsOneOrNull() }
+        io.mockk.verify(atLeast = 1) { chapterQuery.executeAsOneOrNull() }
+
+        // Verify update operations occurred
+        coVerify(exactly = 1) {
+            chaptersQueries.update(
+                chapterId = 10L,
+                mangaId = null,
+                url = null,
+                name = null,
+                scanlator = null,
+                read = true,
+                bookmark = true,
+                lastPageRead = 10L,
+                chapterNumber = null,
+                sourceOrder = null,
+                dateFetch = null,
+                dateUpload = null,
+                version = null,
+                isSyncing = 1L,
+                memo = null,
+            )
+        }
+
+        coVerify(exactly = 1) {
+            mangasQueries.update(
+                mangaId = 1L,
+                source = null,
+                url = null,
+                artist = null,
+                author = null,
+                description = null,
+                genre = null,
+                title = null,
+                status = null,
+                thumbnailUrl = null,
+                favorite = true,
+                lastUpdate = null,
+                nextUpdate = null,
+                initialized = null,
+                viewer = null,
+                chapterFlags = null,
+                coverLastModified = null,
+                dateAdded = null,
+                updateStrategy = null,
+                calculateInterval = null,
+                version = null,
+                isSyncing = 1L,
+                notes = null,
+                memo = null,
+            )
+        }
+
+        coVerify(exactly = 1) {
+            historyQueries.upsert(
+                chapterId = 10L,
+                readAt = Date(2000000L),
+                time_read = 500L,
+            )
+        }
+
+        coVerify(exactly = 1) { syncQueries.resetAllChapterIsSyncing() }
+        coVerify(exactly = 1) { syncQueries.resetAllMangaIsSyncing() }
+    }
+}
