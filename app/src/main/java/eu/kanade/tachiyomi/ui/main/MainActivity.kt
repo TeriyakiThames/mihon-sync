@@ -603,6 +603,11 @@ class MainActivity : BaseActivity() {
             (scheme == "mihon" && data?.host == "extension-store")
     }
 
+    override fun onPause() {
+        super.onPause()
+        appGraph.syncManager.triggerSync()
+    }
+
     companion object {
         const val INTENT_SEARCH = "eu.kanade.tachiyomi.SEARCH"
         const val INTENT_SEARCH_QUERY = "query"

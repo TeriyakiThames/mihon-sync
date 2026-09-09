@@ -38,6 +38,28 @@ Discover and read manga, webtoons, comics, and more – easier than ever on your
 
 </div>
 
+## 🔄 End-to-End Encrypted (E2EE) Sync
+
+This fork introduces multi-device cross-synchronization for Mihon with zero compromise on privacy.
+
+### Key Highlights
+* **Zero-Knowledge Privacy:** All synced data (reading history, chapter read progress, page bookmarks, library entries) is encrypted on-device using **AES-256-GCM** before transmission. The server only sees opaque ciphertext.
+* **Granular Diffing:** Instead of uploading massive backup files on every read, Mihon Sync queries SQLDelight timestamp diffs (`last_modified_at` and `last_read`), transmitting only lightweight deltas.
+* **Smart Lifecycle Triggers:** Automatically synchronizes in the background:
+  - When exiting the reader
+  - When leaving the app
+  - When transitioning to a new chapter
+* **Pairing Links & QR Codes:** Easily link devices by generating or importing shareable `mihon-sync://` pairing links.
+* **Minimal Rebase Architecture:** All sync code is strictly decoupled from Mihon's core domain interactors in `eu.kanade.tachiyomi.sync.*`, ensuring effortless rebases with upstream Mihon.
+
+### Getting Started
+1. Deploy the companion backend [mihon-sync-backend](https://github.com/TeriyakiThames/mihon-sync-backend) to Vercel.
+2. On your primary device, navigate to **More → Settings → Sync**.
+3. Set your server URL and tap **Generate new room & key**.
+4. Tap **Share pairing link** to copy the URI.
+5. On your secondary device, go to **More → Settings → Sync → Join with pairing link** and paste the URI.
+
+
 ## Contributing
 
 [Code of conduct](./CODE_OF_CONDUCT.md) · [Contributing guide](./CONTRIBUTING.md)

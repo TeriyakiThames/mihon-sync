@@ -1,0 +1,144 @@
+import java.util.Date;
+import kotlin.Boolean;
+import kotlin.String;
+import kotlin.collections.List;
+
+-- Extract chapters modified since given epoch seconds, joined with parent manga identity
+getModifiedChapters:
+SELECT
+    C._id AS chapterId,
+    M.source AS mangaSource,
+    M.url AS mangaUrl,
+    C.url AS chapterUrl,
+    C.name AS chapterName,
+    C.read,
+    C.bookmark,
+    C.last_page_read AS lastPageRead,
+    C.chapter_number AS chapterNumber,
+    C.scanlator,
+    C.last_modified_at AS lastModifiedAt,
+    C.version
+FROM chapters C
+JOIN mangas M ON C.manga_id = M._id
+WHERE C.last_modified_at > :sinceSeconds;
+
+-- Extract history records modified since given Date/millis, joined with manga & chapter identity
+getModifiedHistory:
+SELECT
+    H._id AS historyId,
+    M.source AS mangaSource,
+    M.url AS mangaUrl,
+    C.url AS chapterUrl,
+    H.last_read AS lastRead,
+    H.time_read AS timeRead
+FROM history H
+JOIN chapters C ON H.chapter_id = C._id
+JOIN mangas M ON C.manga_id = M._id
+WHERE H.last_read > :sinceMillis;
+
+-- Extract favorite mangas modified since given epoch seconds
+getModifiedMangas:
+SELECT
+    M._id AS mangaId,
+    M.source,
+    M.url,
+    M.title,
+    M.artist,
+    M.author,
+    M.description,
+    M.genre,
+    M.status,
+    M.thumbnail_url AS thumbnailUrl,
+    M.favorite,
+    M.chapter_flags AS chapterFlags,
+    M.viewer AS viewerFlags,
+    M.date_added AS dateAdded,
+    M.last_modified_at AS lastModifiedAt,
+    M.favorite_modified_at AS favoriteModifiedAt,
+    M.version
+FROM mangas M
+WHERE M.favorite = 1 AND M.last_modified_at > :sinceSeconds;
+
+-- Extract categories associated with a manga
+getCategoriesForManga:
+SELECT
+    C.name,
+    C.sort AS `order`,
+    C.flags
+FROM categories C
+JOIN mangas_categories MC ON C._id = MC.category_id
+WHERE MC.manga_id = :mangaId;
+
+-- Helper to find local manga by natural key
+getMangaBySourceAndUrl:
+SELECT *
+FROM mangas
+WHERE source = :source AND url = :url
+LIMIT 1;
+
+-- Helper to find local chapter by parent manga ID and chapter URL
+getChapterByMangaIdAndUrl:
+SELECT *
+FROM chapters
+WHERE manga_id = :mangaId AND url = :chapterUrl
+LIMIT 1;
+
+-- Helper to find category by name
+getCategoryByName:
+SELECT *
+FROM categories
+WHERE name = :name
+LIMIT 1;
+
+-- Update chapter sync state suppressing version bump via is_syncing = 1
+updateChapterSyncState:
+UPDATE chapters
+SET
+    read = :read,
+    bookmark = :bookmark,
+    last_page_read = :lastPageRead,
+    is_syncing = 1
+WHERE _id = :chapterId;
+
+-- Update manga sync state suppressing version bump via is_syncing = 1
+updateMangaSyncState:
+UPDATE mangas
+SET
+    favorite = :favorite,
+    is_syncing = 1
+WHERE _id = :mangaId;
+
+-- Set is_syncing flag on specific chapter
+setChapterIsSyncing:
+UPDATE chapters
+SET is_syncing = :isSyncing
+WHERE _id = :chapterId;
+
+-- Set is_syncing flag on specific manga
+setMangaIsSyncing:
+UPDATE mangas
+SET is_syncing = :isSyncing
+WHERE _id = :mangaId;
+
+-- Reset is_syncing on all chapters
+resetAllChapterIsSyncing:
+UPDATE chapters
+SET is_syncing = 0
+WHERE is_syncing != 0;
+
+-- Reset is_syncing on all mangas
+resetAllMangaIsSyncing:
+UPDATE mangas
+SET is_syncing = 0
+WHERE is_syncing != 0;
+
+-- Upsert history record
+upsertHistory:
+INSERT INTO history(chapter_id, last_read, time_read)
+VALUES (:chapterId, :lastRead, :timeRead)
+ON CONFLICT(chapter_id)
+DO UPDATE
+SET
+    last_read = :lastRead,
+    time_read = time_read + :timeRead
+WHERE chapter_id = :chapterId;

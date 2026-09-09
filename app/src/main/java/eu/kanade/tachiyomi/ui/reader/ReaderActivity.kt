@@ -217,6 +217,14 @@ class ReaderActivity : BaseActivity() {
             .onEach(::setChapters)
             .launchIn(lifecycleScope)
 
+        viewModel.state
+            .map { it.viewerChapters?.currChapter?.chapter?.id }
+            .distinctUntilChanged()
+            .filterNotNull()
+            .drop(1)
+            .onEach { graph.syncManager.triggerSync() }
+            .launchIn(lifecycleScope)
+
         viewModel.eventFlow
             .onEach { event ->
                 when (event) {
@@ -244,6 +252,11 @@ class ReaderActivity : BaseActivity() {
                 }
             }
             .launchIn(lifecycleScope)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        graph.syncManager.triggerSync()
     }
 
     private fun ReaderActivityBinding.setComposeOverlay(): Unit = composeOverlay.setComposeContent {

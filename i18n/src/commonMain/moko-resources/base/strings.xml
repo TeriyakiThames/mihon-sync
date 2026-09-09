@@ -622,6 +622,28 @@
     <!-- Sync section -->
     <string name="syncing_library">Syncing library</string>
     <string name="library_sync_complete">Library sync complete</string>
+    <string name="pref_category_sync">Sync</string>
+    <string name="pref_sync_summary">Sync reading history, progress, and library</string>
+    <string name="pref_sync_enable">Enable synchronization</string>
+    <string name="pref_sync_enable_summary">Automatically sync reading progress on app and reader events</string>
+    <string name="pref_sync_server_url">Server URL</string>
+    <string name="pref_sync_room_id">Room ID</string>
+    <string name="pref_sync_encryption_key">Encryption Key</string>
+    <string name="pref_sync_now">Sync now</string>
+    <string name="pref_sync_now_summary">Force immediate synchronization with server</string>
+    <string name="pref_sync_last_synced">Last synced: %s</string>
+    <string name="pref_sync_never">Never</string>
+    <string name="pref_sync_share_pairing">Share pairing link</string>
+    <string name="pref_sync_share_pairing_summary">Copy or share link to pair another device</string>
+    <string name="pref_sync_import_pairing">Join with pairing link</string>
+    <string name="pref_sync_import_pairing_summary">Paste a mihon-sync:// link from another device</string>
+    <string name="pref_sync_generate_credentials">Generate new room &amp; key</string>
+    <string name="pref_sync_generate_credentials_summary">Create a fresh random Room ID and 256-bit encryption key</string>
+    <string name="pref_sync_pairing_link_copied">Pairing link copied to clipboard</string>
+    <string name="pref_sync_pairing_invalid">Invalid pairing link</string>
+    <string name="pref_sync_pairing_success">Successfully configured sync from pairing link</string>
+    <string name="pref_sync_clear">Reset sync configuration</string>
+    <string name="pref_sync_clear_summary">Remove server URL, room ID, and encryption key from this device</string>
 
       <!-- Advanced section -->
     <string name="label_network">Networking</string>

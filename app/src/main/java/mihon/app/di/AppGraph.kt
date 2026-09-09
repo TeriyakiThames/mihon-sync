@@ -37,6 +37,8 @@ import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import eu.kanade.tachiyomi.ui.reader.setting.ReaderPreferences
 import eu.kanade.tachiyomi.ui.setting.track.BaseOAuthLoginActivity
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
+import eu.kanade.tachiyomi.sync.service.SyncManager
+import eu.kanade.tachiyomi.sync.service.SyncPreferences
 import eu.kanade.tachiyomi.util.CrashLogUtil
 import kotlinx.serialization.json.Json
 import mihon.core.metro.IsDebugBuild
@@ -88,6 +90,8 @@ interface AppGraph : ViewModelGraph {
     val privacyPreferences: PrivacyPreferences
     val securityPreferences: SecurityPreferences
     val downloadPreferences: DownloadPreferences
+    val syncPreferences: SyncPreferences
+    val syncManager: SyncManager
 
     val crashLogUtil: CrashLogUtil
 

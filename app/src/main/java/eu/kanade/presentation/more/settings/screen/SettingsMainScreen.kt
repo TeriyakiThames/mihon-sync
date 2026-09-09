@@ -214,6 +214,12 @@ object SettingsMainScreen : Screen() {
             screen = SettingsDataScreen,
         ),
         Item(
+            titleRes = MR.strings.pref_category_sync,
+            subtitleRes = MR.strings.pref_sync_summary,
+            icon = MaterialSymbols.Rounded.Sync,
+            screen = SettingsSyncScreen,
+        ),
+        Item(
             titleRes = MR.strings.pref_category_security,
             subtitleRes = MR.strings.pref_security_summary,
             icon = MaterialSymbols.Rounded.Security,
