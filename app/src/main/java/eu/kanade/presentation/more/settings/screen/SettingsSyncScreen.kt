@@ -30,6 +30,7 @@ import eu.kanade.tachiyomi.sync.crypto.SyncPairingUtil
 import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.coroutines.launch
 import mihon.app.di.appGraph
+import tachiyomi.core.common.i18n.stringResource
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.util.collectAsState
@@ -54,12 +55,10 @@ object SettingsSyncScreen : SearchableSettings {
         var showImportDialog by remember { mutableStateOf(false) }
         var showClearConfirmDialog by remember { mutableStateOf(false) }
 
-        val lastSyncSubtitle = remember(lastSyncTimestamp) {
-            if (lastSyncTimestamp > 0) {
-                relativeTimeSpanString(lastSyncTimestamp)
-            } else {
-                null
-            }
+        val lastSyncSubtitle = if (lastSyncTimestamp > 0) {
+            relativeTimeSpanString(lastSyncTimestamp)
+        } else {
+            null
         }
 
         // Dialog for importing/pasting a pairing URI
@@ -96,12 +95,12 @@ object SettingsSyncScreen : SearchableSettings {
                                 syncPreferences.encryptionKey.set(pairingInfo.secretKey)
                                 syncPreferences.isSyncEnabled.set(true)
                                 showImportDialog = false
-                                context.toast(stringResource(MR.strings.pref_sync_pairing_success))
+                                context.toast(MR.strings.pref_sync_pairing_success)
                                 scope.launch {
                                     syncManager.syncNow(force = true)
                                 }
                             } catch (e: Exception) {
-                                context.toast("${stringResource(MR.strings.pref_sync_pairing_invalid)}: ${e.message}")
+                                context.toast("${context.stringResource(MR.strings.pref_sync_pairing_invalid)}: ${e.message}")
                             }
                         },
                     ) {
@@ -126,7 +125,7 @@ object SettingsSyncScreen : SearchableSettings {
                         onClick = {
                             syncPreferences.clear()
                             showClearConfirmDialog = false
-                            context.toast(stringResource(MR.strings.pref_sync_clear))
+                            context.toast(MR.strings.pref_sync_clear)
                         },
                     ) {
                         Text(text = stringResource(MR.strings.action_ok))
@@ -166,9 +165,9 @@ object SettingsSyncScreen : SearchableSettings {
                                     val success = syncManager.syncNow(force = true)
                                     isSyncing = false
                                     if (success) {
-                                        context.toast(stringResource(MR.strings.sync_success))
+                                        context.toast(MR.strings.sync_success)
                                     } else {
-                                        context.toast(stringResource(MR.strings.sync_failed))
+                                        context.toast(MR.strings.sync_failed)
                                     }
                                 }
                             }
@@ -193,7 +192,7 @@ object SettingsSyncScreen : SearchableSettings {
                                 val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                                 val clip = ClipData.newPlainText("Mihon Sync Pairing Link", uri)
                                 clipboard.setPrimaryClip(clip)
-                                context.toast(stringResource(MR.strings.pref_sync_pairing_link_copied))
+                                context.toast(MR.strings.pref_sync_pairing_link_copied)
 
                                 val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                     type = "text/plain"

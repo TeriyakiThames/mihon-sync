@@ -644,6 +644,10 @@
     <string name="pref_sync_pairing_success">Successfully configured sync from pairing link</string>
     <string name="pref_sync_clear">Reset sync configuration</string>
     <string name="pref_sync_clear_summary">Remove server URL, room ID, and encryption key from this device</string>
+    <string name="sync_in_progress">Sync in progress…</string>
+    <string name="sync_success">Sync completed successfully</string>
+    <string name="sync_failed">Sync failed</string>
+    <string name="sync_pair_device">Pair Device</string>
 
       <!-- Advanced section -->
     <string name="label_network">Networking</string>

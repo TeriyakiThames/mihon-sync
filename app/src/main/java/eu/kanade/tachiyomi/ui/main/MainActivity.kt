@@ -603,6 +603,11 @@ class MainActivity : BaseActivity() {
             (scheme == "mihon" && data?.host == "extension-store")
     }
 
+    override fun onResume() {
+        super.onResume()
+        appGraph.syncManager.triggerSync(0L)
+    }
+
     override fun onPause() {
         super.onPause()
         appGraph.syncManager.triggerSync()

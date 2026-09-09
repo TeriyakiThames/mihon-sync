@@ -18,7 +18,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import logcat.LogPriority
-import logcat.logcat
+import tachiyomi.core.common.util.system.logcat
 
 /**
  * Coordinates end-to-end synchronization workflow:
@@ -104,6 +104,7 @@ class SyncManager(
                         merger.merge(remotePayload)
                     } catch (e: Exception) {
                         logcat(LogPriority.ERROR, e) { "Failed to decrypt or merge sync update ${update.id}" }
+                        throw e
                     }
                 }
 

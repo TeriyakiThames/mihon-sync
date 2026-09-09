@@ -90,23 +90,7 @@ FROM categories
 WHERE name = :name
 LIMIT 1;
 
--- Update chapter sync state suppressing version bump via is_syncing = 1
-updateChapterSyncState:
-UPDATE chapters
-SET
-    read = :read,
-    bookmark = :bookmark,
-    last_page_read = :lastPageRead,
-    is_syncing = 1
-WHERE _id = :chapterId;
 
--- Update manga sync state suppressing version bump via is_syncing = 1
-updateMangaSyncState:
-UPDATE mangas
-SET
-    favorite = :favorite,
-    is_syncing = 1
-WHERE _id = :mangaId;
 
 -- Set is_syncing flag on specific chapter
 setChapterIsSyncing:
@@ -132,13 +116,3 @@ UPDATE mangas
 SET is_syncing = 0
 WHERE is_syncing != 0;
 
--- Upsert history record
-upsertHistory:
-INSERT INTO history(chapter_id, last_read, time_read)
-VALUES (:chapterId, :lastRead, :timeRead)
-ON CONFLICT(chapter_id)
-DO UPDATE
-SET
-    last_read = :lastRead,
-    time_read = time_read + :timeRead
-WHERE chapter_id = :chapterId;

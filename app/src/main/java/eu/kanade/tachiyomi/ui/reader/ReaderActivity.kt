@@ -254,11 +254,6 @@ class ReaderActivity : BaseActivity() {
             .launchIn(lifecycleScope)
     }
 
-    override fun onPause() {
-        super.onPause()
-        graph.syncManager.triggerSync()
-    }
-
     private fun ReaderActivityBinding.setComposeOverlay(): Unit = composeOverlay.setComposeContent {
         val state by viewModel.state.collectAsState()
         val showPageNumber by readerPreferences.showPageNumber.collectAsState()
@@ -362,6 +357,7 @@ class ReaderActivity : BaseActivity() {
             viewModel.updateHistory()
         }
         super.onPause()
+        graph.syncManager.triggerSync()
     }
 
     /**

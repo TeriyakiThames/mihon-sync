@@ -57,11 +57,22 @@ class SyncMerger(
                 newLastPageRead != localChapter.last_page_read ||
                 newBookmark != localChapter.bookmark
             ) {
-                database.syncQueries.updateChapterSyncState(
+                database.chaptersQueries.update(
+                    chapterId = localChapter._id,
+                    mangaId = null,
+                    url = null,
+                    name = null,
+                    scanlator = null,
                     read = newRead,
                     bookmark = newBookmark,
                     lastPageRead = newLastPageRead,
-                    chapterId = localChapter._id,
+                    chapterNumber = null,
+                    sourceOrder = null,
+                    dateFetch = null,
+                    dateUpload = null,
+                    version = null,
+                    isSyncing = 1L,
+                    memo = null,
                 )
             }
         }
@@ -82,10 +93,10 @@ class SyncMerger(
 
             val localLastReadMillis = localHistory?.last_read?.time ?: 0L
             if (remoteHistory.lastRead > localLastReadMillis) {
-                database.syncQueries.upsertHistory(
+                database.historyQueries.upsert(
                     chapterId = localChapter._id,
-                    lastRead = Date(remoteHistory.lastRead),
-                    timeRead = remoteHistory.timeRead,
+                    readAt = Date(remoteHistory.lastRead),
+                    time_read = remoteHistory.timeRead,
                 )
             }
         }
@@ -101,9 +112,31 @@ class SyncMerger(
 
             if (remoteFavMod > localFavMod) {
                 if (localManga.favorite != remoteManga.favorite) {
-                    database.syncQueries.updateMangaSyncState(
-                        favorite = remoteManga.favorite,
+                    database.mangasQueries.update(
                         mangaId = localManga._id,
+                        source = null,
+                        url = null,
+                        artist = null,
+                        author = null,
+                        description = null,
+                        genre = null,
+                        title = null,
+                        status = null,
+                        thumbnailUrl = null,
+                        favorite = remoteManga.favorite,
+                        lastUpdate = null,
+                        nextUpdate = null,
+                        initialized = null,
+                        viewer = null,
+                        chapterFlags = null,
+                        coverLastModified = null,
+                        dateAdded = null,
+                        updateStrategy = null,
+                        calculateInterval = null,
+                        version = null,
+                        isSyncing = 1L,
+                        notes = null,
+                        memo = null,
                     )
                 }
             }
