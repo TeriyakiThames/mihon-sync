@@ -252,7 +252,9 @@ class SyncMergerTest {
     @Test
     fun `merge inserts new manga and chapter when none exist locally`() = runBlocking {
         val mangaQuery = mockk<Query<Mangas>>()
-        coEvery { mangaQuery.awaitAsOneOrNull() } returns null
+        val newLocalManga = mockk<Mangas>(relaxed = true)
+        every { newLocalManga._id } returns 55L
+        coEvery { mangaQuery.awaitAsOneOrNull() } returnsMany listOf(null, newLocalManga)
         every { syncQueries.getMangaBySourceAndUrl(100L, "/manga/new") } returns mangaQuery
 
         val insertMangaQuery = mockk<Query<Long>>()

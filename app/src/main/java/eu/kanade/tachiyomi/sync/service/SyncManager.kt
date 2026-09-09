@@ -100,49 +100,71 @@ class SyncManager(
                 val currentDevice = syncPreferences.deviceId.get()
 
                 // Phase 1: Pull and apply remote updates
-                val pullResponse = apiClient.pullUpdates(sinceTimestamp = lastSyncTime)
+                var currentPullSince = lastSyncTime
+                var hasMoreToPull = true
                 var maxObservedTimestamp = lastSyncTime
+                var serverRequestedSnapshot = false
 
-                // 1a. If server provided a snapshot (gap recovery or first sync), merge snapshot first
-                val snapshot = pullResponse.snapshot
-                if (snapshot != null) {
-                    if (snapshot.timestamp > maxObservedTimestamp) {
-                        maxObservedTimestamp = snapshot.timestamp
-                    }
-                    try {
-                        val decryptedSnapshotJson = CryptoUtil.decryptString(snapshot.payload, encryptionKey)
-                        val snapshotPayload = json.decodeFromString<SyncPayload>(decryptedSnapshotJson)
-                        merger.merge(snapshotPayload)
-                    } catch (e: Exception) {
-                        logcat(LogPriority.ERROR, e) { "Failed to decrypt or merge snapshot ${snapshot.id}" }
-                        throw e
-                    }
-                }
-
-                // 1b. Apply incremental updates
-                for (update in pullResponse.updates) {
-                    if (update.timestamp > maxObservedTimestamp) {
-                        maxObservedTimestamp = update.timestamp
+                while (hasMoreToPull) {
+                    val pullResponse = apiClient.pullUpdates(sinceTimestamp = currentPullSince)
+                    if (pullResponse.needsSnapshot) {
+                        serverRequestedSnapshot = true
                     }
 
-                    // Skip self-authored updates if deviceId is tagged
-                    if (!update.deviceId.isNullOrBlank() && update.deviceId == currentDevice) {
-                        continue
+                    // 1a. If server provided a snapshot (gap recovery or first sync), merge snapshot first
+                    val snapshot = pullResponse.snapshot
+                    if (snapshot != null) {
+                        if (snapshot.timestamp > maxObservedTimestamp) {
+                            maxObservedTimestamp = snapshot.timestamp
+                        }
+                        try {
+                            val decryptedSnapshotJson = CryptoUtil.decryptString(snapshot.payload, encryptionKey)
+                            val snapshotPayload = json.decodeFromString<SyncPayload>(decryptedSnapshotJson)
+                            merger.merge(snapshotPayload)
+                        } catch (e: Exception) {
+                            logcat(LogPriority.ERROR, e) { "Failed to decrypt or merge snapshot ${snapshot.id}" }
+                            throw e
+                        }
                     }
 
-                    try {
-                        val decryptedJson = CryptoUtil.decryptString(update.payload, encryptionKey)
-                        val remotePayload = json.decodeFromString<SyncPayload>(decryptedJson)
-                        merger.merge(remotePayload)
-                    } catch (e: Exception) {
-                        logcat(LogPriority.ERROR, e) { "Failed to decrypt or merge sync update ${update.id}" }
-                        throw e
+                    // 1b. Apply incremental updates
+                    for (update in pullResponse.updates) {
+                        if (update.timestamp > maxObservedTimestamp) {
+                            maxObservedTimestamp = update.timestamp
+                        }
+
+                        // Skip self-authored updates if deviceId is tagged
+                        if (!update.deviceId.isNullOrBlank() && update.deviceId == currentDevice) {
+                            continue
+                        }
+
+                        try {
+                            val decryptedJson = CryptoUtil.decryptString(update.payload, encryptionKey)
+                            val remotePayload = json.decodeFromString<SyncPayload>(decryptedJson)
+                            merger.merge(remotePayload)
+                        } catch (e: Exception) {
+                            logcat(LogPriority.ERROR, e) { "Failed to decrypt or merge sync update ${update.id}" }
+                            throw e
+                        }
+                    }
+
+                    // Commit watermark after each successfully merged batch
+                    if (maxObservedTimestamp > syncPreferences.lastSyncTimestamp.get()) {
+                        syncPreferences.lastSyncTimestamp.set(maxObservedTimestamp)
+                    }
+
+                    if (pullResponse.hasMore && pullResponse.nextSince != null && pullResponse.nextSince > currentPullSince) {
+                        currentPullSince = pullResponse.nextSince
+                    } else if (pullResponse.hasMore && maxObservedTimestamp > currentPullSince) {
+                        currentPullSince = maxObservedTimestamp
+                    } else {
+                        hasMoreToPull = false
                     }
                 }
 
                 // Phase 2: Diff local changes and push
                 // 2a. Opportunistic full snapshot upload if server requested one
-                if (pullResponse.needsSnapshot) {
+                if (serverRequestedSnapshot) {
                     try {
                         val fullSnapshotDiff = diffEngine.extractDiff(sinceTimestampMillis = 0L)
                         val fullSnapshotJson = json.encodeToString(fullSnapshotDiff)
@@ -152,14 +174,16 @@ class SyncManager(
                         val serverSnapshotTs = snapshotResponse.timestamp ?: snapshotTimestamp
                         if (serverSnapshotTs > maxObservedTimestamp) {
                             maxObservedTimestamp = serverSnapshotTs
+                            syncPreferences.lastSyncTimestamp.set(maxObservedTimestamp)
                         }
                     } catch (e: Exception) {
-                        logcat(LogPriority.WARN, e) { "Failed to push opportunistic snapshot" }
+                        logcat(LogPriority.WARN, e) { "Failed to push opportunistic snapshot: ${e.message}" }
                     }
                 }
 
                 // 2b. Diff local incremental changes and push
-                val localDiff = diffEngine.extractDiff(sinceTimestampMillis = lastSyncTime)
+                val currentWatermark = syncPreferences.lastSyncTimestamp.get()
+                val localDiff = diffEngine.extractDiff(sinceTimestampMillis = currentWatermark)
                 val hasChanges = localDiff.chapters.isNotEmpty() ||
                     localDiff.history.isNotEmpty() ||
                     localDiff.mangas.isNotEmpty()
@@ -177,7 +201,7 @@ class SyncManager(
                 }
 
                 // Phase 3: Update watermark timestamp
-                if (maxObservedTimestamp > lastSyncTime) {
+                if (maxObservedTimestamp > syncPreferences.lastSyncTimestamp.get()) {
                     syncPreferences.lastSyncTimestamp.set(maxObservedTimestamp)
                 }
 

@@ -143,5 +143,7 @@ data class SyncUpdatesResponse(
     val needsSnapshot: Boolean = false,
     val snapshot: SyncSnapshotRecord? = null,
     val updates: List<SyncUpdateRecord> = emptyList(),
+    val hasMore: Boolean = false,
+    val nextSince: Long? = null,
     val error: String? = null,
 )

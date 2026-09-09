@@ -164,4 +164,23 @@ class SyncManagerTest {
         coVerify(atLeast = 1) { diffEngine.extractDiff(sinceTimestampMillis = 0L) }
         coVerify(exactly = 1) { apiClient.pushSnapshot(any(), any()) }
     }
+
+    @Test
+    fun `pulls subsequent pages when pullResponse indicates hasMore`() = runBlocking {
+        coEvery { apiClient.pullUpdates(sinceTimestamp = 0L) } returns SyncUpdatesResponse(
+            updates = emptyList(),
+            hasMore = true,
+            nextSince = 1000L,
+        )
+        coEvery { apiClient.pullUpdates(sinceTimestamp = 1000L) } returns SyncUpdatesResponse(
+            updates = emptyList(),
+            hasMore = false,
+        )
+
+        val success = syncManager.syncNow(force = true)
+
+        assertTrue(success)
+        coVerify(exactly = 1) { apiClient.pullUpdates(sinceTimestamp = 0L) }
+        coVerify(exactly = 1) { apiClient.pullUpdates(sinceTimestamp = 1000L) }
+    }
 }

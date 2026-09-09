@@ -1,7 +1,11 @@
 package eu.kanade.tachiyomi.sync.crypto
 
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.security.SecureRandom
 import java.util.Base64
+import java.util.zip.GZIPInputStream
+import java.util.zip.GZIPOutputStream
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.spec.GCMParameterSpec
@@ -84,12 +88,42 @@ object CryptoUtil {
         return Base64.getEncoder().encodeToString(encryptedBytes)
     }
 
+    private const val GZIP_MAGIC_BYTE_1 = 0x1F.toByte()
+    private const val GZIP_MAGIC_BYTE_2 = 0x8B.toByte()
+
+    /**
+     * Compresses raw bytes using standard GZIP format.
+     */
+    fun compressGzip(bytes: ByteArray): ByteArray {
+        val bos = ByteArrayOutputStream()
+        GZIPOutputStream(bos).use { it.write(bytes) }
+        return bos.toByteArray()
+    }
+
+    /**
+     * Decompresses bytes using GZIP if they contain the standard GZIP magic header (0x1F, 0x8B).
+     * If not GZIP compressed (e.g. legacy uncompressed ciphertext), returns the original bytes unmodified.
+     */
+    fun decompressGzipIfCompressed(bytes: ByteArray): ByteArray {
+        if (bytes.size >= 2 && bytes[0] == GZIP_MAGIC_BYTE_1 && bytes[1] == GZIP_MAGIC_BYTE_2) {
+            return try {
+                GZIPInputStream(ByteArrayInputStream(bytes)).use { it.readBytes() }
+            } catch (e: Exception) {
+                bytes
+            }
+        }
+        return bytes
+    }
+
     /**
      * Encrypts a UTF-8 plaintext string using a Base64-encoded 256-bit key.
+     * Automatically applies GZIP compression prior to AES-256-GCM encryption.
      * Returns Base64-encoded string.
      */
     fun encryptString(plainText: String, base64Key: String): String {
-        return encrypt(plainText.toByteArray(Charsets.UTF_8), base64Key)
+        val plainBytes = plainText.toByteArray(Charsets.UTF_8)
+        val compressedBytes = compressGzip(plainBytes)
+        return encrypt(compressedBytes, base64Key)
     }
 
     /**
@@ -132,9 +166,12 @@ object CryptoUtil {
 
     /**
      * Decrypts Base64-encoded ciphertext into a UTF-8 plaintext string.
+     * Automatically decompresses GZIP payloads with fallback to raw UTF-8 for uncompressed payloads.
      */
     fun decryptString(base64Ciphertext: String, base64Key: String): String {
-        return String(decrypt(base64Ciphertext, base64Key), Charsets.UTF_8)
+        val decryptedBytes = decrypt(base64Ciphertext, base64Key)
+        val decompressedBytes = decompressGzipIfCompressed(decryptedBytes)
+        return String(decompressedBytes, Charsets.UTF_8)
     }
 
     /**
