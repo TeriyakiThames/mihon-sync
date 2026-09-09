@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.sync
 
 import app.cash.sqldelight.Query
 import app.cash.sqldelight.SuspendingTransactionWithoutReturn
+import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
 import eu.kanade.tachiyomi.sync.data.ChapterSyncRecord
 import eu.kanade.tachiyomi.sync.data.HistorySyncRecord
@@ -12,6 +13,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.mockkStatic
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonObject
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -37,6 +39,7 @@ class SyncMergerTest {
 
     @BeforeEach
     fun setUp() {
+        mockkStatic("app.cash.sqldelight.async.coroutines.QueryExtensionsKt")
         database = mockk()
         syncQueries = mockk(relaxed = true)
         chaptersQueries = mockk(relaxed = true)
@@ -131,15 +134,15 @@ class SyncMergerTest {
         )
 
         val mangaQuery = mockk<Query<Mangas>>()
-        every { mangaQuery.executeAsOneOrNull() } returns localManga
+        coEvery { mangaQuery.awaitAsOneOrNull() } returns localManga
         every { syncQueries.getMangaBySourceAndUrl(100L, "/manga/1") } returns mangaQuery
 
         val chapterQuery = mockk<Query<Chapters>>()
-        every { chapterQuery.executeAsOneOrNull() } returns localChapter
+        coEvery { chapterQuery.awaitAsOneOrNull() } returns localChapter
         every { syncQueries.getChapterByMangaIdAndUrl(1L, "/chapter/1") } returns chapterQuery
 
         val historyQuery = mockk<Query<tachiyomi.data.History>>()
-        every { historyQuery.executeAsOneOrNull() } returns null
+        coEvery { historyQuery.awaitAsOneOrNull() } returns null
         every { historyQueries.getHistoryByChapterUrlAndMangaId(any(), any()) } returns historyQuery
 
         val payload = SyncPayload(
@@ -178,9 +181,9 @@ class SyncMergerTest {
 
         merger.merge(payload)
 
-        // Verify synchronous query executions were invoked
-        io.mockk.verify(atLeast = 1) { mangaQuery.executeAsOneOrNull() }
-        io.mockk.verify(atLeast = 1) { chapterQuery.executeAsOneOrNull() }
+        // Verify async query executions were invoked
+        coVerify(atLeast = 1) { mangaQuery.awaitAsOneOrNull() }
+        coVerify(atLeast = 1) { chapterQuery.awaitAsOneOrNull() }
 
         // Verify update operations occurred
         coVerify(exactly = 1) {

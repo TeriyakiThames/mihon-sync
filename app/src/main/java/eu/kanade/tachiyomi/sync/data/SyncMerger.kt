@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.sync.data
 
+import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
@@ -31,11 +32,11 @@ class SyncMerger(
             for (remoteChapter in remotePayload.chapters) {
                 val localManga = database.syncQueries
                     .getMangaBySourceAndUrl(remoteChapter.mangaSource, remoteChapter.mangaUrl)
-                    .executeAsOneOrNull() ?: continue
+                    .awaitAsOneOrNull() ?: continue
 
                 val localChapter = database.syncQueries
                     .getChapterByMangaIdAndUrl(localManga._id, remoteChapter.chapterUrl)
-                    .executeAsOneOrNull() ?: continue
+                    .awaitAsOneOrNull() ?: continue
 
                 // Forward progress: if either local or remote is read, chapter is marked read
                 val newRead = localChapter.read || remoteChapter.read
@@ -81,15 +82,15 @@ class SyncMerger(
             for (remoteHistory in remotePayload.history) {
                 val localManga = database.syncQueries
                     .getMangaBySourceAndUrl(remoteHistory.mangaSource, remoteHistory.mangaUrl)
-                    .executeAsOneOrNull() ?: continue
+                    .awaitAsOneOrNull() ?: continue
 
                 val localChapter = database.syncQueries
                     .getChapterByMangaIdAndUrl(localManga._id, remoteHistory.chapterUrl)
-                    .executeAsOneOrNull() ?: continue
+                    .awaitAsOneOrNull() ?: continue
 
                 val localHistory = database.historyQueries
                     .getHistoryByChapterUrlAndMangaId(remoteHistory.chapterUrl, localManga._id)
-                    .executeAsOneOrNull()
+                    .awaitAsOneOrNull()
 
                 val localLastReadMillis = localHistory?.last_read?.time ?: 0L
                 if (remoteHistory.lastRead > localLastReadMillis) {
@@ -105,7 +106,7 @@ class SyncMerger(
             for (remoteManga in remotePayload.mangas) {
                 val localManga = database.syncQueries
                     .getMangaBySourceAndUrl(remoteManga.source, remoteManga.url)
-                    .executeAsOneOrNull() ?: continue
+                    .awaitAsOneOrNull() ?: continue
 
                 val remoteFavMod = remoteManga.favoriteModifiedAt ?: remoteManga.lastModifiedAt
                 val localFavMod = localManga.favorite_modified_at ?: localManga.last_modified_at
