@@ -12,6 +12,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -37,6 +40,8 @@ class SyncManager(
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val syncMutex = Mutex()
+    private val _isSyncing = MutableStateFlow(false)
+    val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
     private var debounceJob: Job? = null
     var lastSyncCompletedTimestamp: Long = 0L
         internal set
@@ -129,6 +134,7 @@ class SyncManager(
         if (!syncPreferences.isConfigured()) return false
 
         return syncMutex.withLock {
+            _isSyncing.value = true
             try {
                 internalPull()
                 lastSyncCompletedTimestamp = System.currentTimeMillis()
@@ -136,6 +142,8 @@ class SyncManager(
             } catch (e: Exception) {
                 logcat(LogPriority.ERROR, e) { "Pull from origin failed: ${e.message}" }
                 false
+            } finally {
+                _isSyncing.value = false
             }
         }
     }
@@ -149,6 +157,7 @@ class SyncManager(
         if (!syncPreferences.isConfigured()) return false
 
         return syncMutex.withLock {
+            _isSyncing.value = true
             try {
                 // Rebase: pull remote updates first to reconcile state
                 internalPull()
@@ -182,6 +191,8 @@ class SyncManager(
             } catch (e: Exception) {
                 logcat(LogPriority.ERROR, e) { "Push to origin failed: ${e.message}" }
                 false
+            } finally {
+                _isSyncing.value = false
             }
         }
     }

@@ -1,6 +1,8 @@
 package eu.kanade.presentation.history
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.items
 import androidx.compose.animation.core.LinearEasing
@@ -11,10 +13,12 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.tooling.preview.PreviewLightDark
@@ -54,59 +58,68 @@ fun HistoryScreen(
 ) {
     Scaffold(
         topBar = { scrollBehavior ->
-            SearchToolbar(
-                titleContent = { AppBarTitle(stringResource(MR.strings.history)) },
-                searchQuery = state.searchQuery,
-                onChangeSearchQuery = onSearchQueryChange,
-                preActions = {
-                    if (isSyncing) {
-                        val infiniteTransition = rememberInfiniteTransition(label = "sync_rotation")
-                        val angle by infiniteTransition.animateFloat(
-                            initialValue = 0f,
-                            targetValue = 360f,
-                            animationSpec = infiniteRepeatable(
-                                animation = tween(1000, easing = LinearEasing),
-                                repeatMode = RepeatMode.Restart,
-                            ),
-                            label = "sync_angle",
-                        )
-                        IconButton(
-                            onClick = {},
-                            enabled = false,
-                        ) {
-                            Icon(
-                                imageVector = MaterialSymbols.Rounded.Refresh,
-                                contentDescription = stringResource(MR.strings.sync_in_progress),
-                                modifier = Modifier.rotate(angle),
+            Box {
+                SearchToolbar(
+                    titleContent = { AppBarTitle(stringResource(MR.strings.history)) },
+                    searchQuery = state.searchQuery,
+                    onChangeSearchQuery = onSearchQueryChange,
+                    preActions = {
+                        if (isSyncing) {
+                            val infiniteTransition = rememberInfiniteTransition(label = "sync_rotation")
+                            val angle by infiniteTransition.animateFloat(
+                                initialValue = 0f,
+                                targetValue = 360f,
+                                animationSpec = infiniteRepeatable(
+                                    animation = tween(1000, easing = LinearEasing),
+                                    repeatMode = RepeatMode.Restart,
+                                ),
+                                label = "sync_angle",
+                            )
+                            IconButton(
+                                onClick = {},
+                                enabled = false,
+                            ) {
+                                Icon(
+                                    imageVector = MaterialSymbols.Rounded.Refresh,
+                                    contentDescription = stringResource(MR.strings.sync_in_progress),
+                                    modifier = Modifier.rotate(angle),
+                                )
+                            }
+                        } else {
+                            AppBarActions(
+                                listOf(
+                                    AppBar.Action(
+                                        title = stringResource(MR.strings.pref_sync_now),
+                                        icon = MaterialSymbols.Rounded.Refresh,
+                                        onClick = onClickSync,
+                                    ),
+                                ),
                             )
                         }
-                    } else {
+                    },
+                    actions = {
                         AppBarActions(
                             listOf(
                                 AppBar.Action(
-                                    title = stringResource(MR.strings.pref_sync_now),
-                                    icon = MaterialSymbols.Rounded.Refresh,
-                                    onClick = onClickSync,
+                                    title = stringResource(MR.strings.pref_clear_history),
+                                    icon = MaterialSymbols.Rounded.DeleteSweep,
+                                    onClick = {
+                                        onDialogChange(HistoryViewModel.Dialog.DeleteAll)
+                                    },
                                 ),
                             ),
                         )
-                    }
-                },
-                actions = {
-                    AppBarActions(
-                        listOf(
-                            AppBar.Action(
-                                title = stringResource(MR.strings.pref_clear_history),
-                                icon = MaterialSymbols.Rounded.DeleteSweep,
-                                onClick = {
-                                    onDialogChange(HistoryViewModel.Dialog.DeleteAll)
-                                },
-                            ),
-                        ),
+                    },
+                    scrollBehavior = scrollBehavior,
+                )
+                if (isSyncing) {
+                    LinearProgressIndicator(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .fillMaxWidth(),
                     )
-                },
-                scrollBehavior = scrollBehavior,
-            )
+                }
+            }
         },
         snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
     ) { contentPadding ->

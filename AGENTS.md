@@ -104,6 +104,7 @@ Synchronization follows a streamlined Git-style workflow:
 - **Decoupled Watermarks**:
   - `lastPullTimestamp`: Tracks remote server stream position for `GET /api/sync?since=...`.
   - `lastSyncTimestamp`: Reflects the latest timestamp for UI display.
+- **Reactive State (`isSyncing`)**: `SyncManager.isSyncing` (`StateFlow<Boolean>`) indicates active synchronization under `syncMutex`, driving live UI feedback (spinning toolbar refresh icon and indeterminate `LinearProgressIndicator` on `HistoryScreen`).
 - **Battery & Data Friendly**: No network calls occur mid-reading (e.g. during chapter transitions); sync only occurs on exit/pause and initial app start / return from background.
 
 ---

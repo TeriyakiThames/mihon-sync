@@ -22,6 +22,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.icerock.moko.resources.StringResource
 import eu.kanade.presentation.more.settings.Preference
 import eu.kanade.presentation.util.relativeTimeSpanString
@@ -50,7 +51,9 @@ object SettingsSyncScreen : SearchableSettings {
 
         val isSyncEnabled by syncPreferences.isSyncEnabled.collectAsState()
         val lastSyncTimestamp by syncPreferences.lastSyncTimestamp.collectAsState()
-        var isSyncing by remember { mutableStateOf(false) }
+        val isSyncingFromManager by syncManager.isSyncing.collectAsStateWithLifecycle()
+        var isManualSyncing by remember { mutableStateOf(false) }
+        val isSyncing = isSyncingFromManager || isManualSyncing
 
         var showImportDialog by remember { mutableStateOf(false) }
         var showClearConfirmDialog by remember { mutableStateOf(false) }
@@ -160,10 +163,13 @@ object SettingsSyncScreen : SearchableSettings {
                         enabled = isSyncEnabled && syncPreferences.isConfigured() && !isSyncing,
                         onClick = {
                             if (!isSyncing) {
-                                isSyncing = true
+                                isManualSyncing = true
                                 scope.launch {
-                                    val success = syncManager.syncNow(force = true)
-                                    isSyncing = false
+                                    val success = try {
+                                        syncManager.syncNow(force = true)
+                                    } finally {
+                                        isManualSyncing = false
+                                    }
                                     if (success) {
                                         context.toast(MR.strings.sync_success)
                                     } else {

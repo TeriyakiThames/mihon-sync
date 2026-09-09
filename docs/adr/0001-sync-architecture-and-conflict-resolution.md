@@ -74,6 +74,10 @@ We selected **Option A (Outbox Dirty Tracking)** alongside refined lifecycle and
 - Category definitions (name, order, flags) update locally if changed remotely.
 - Manga-category associations reconcile bidirectionally, reflecting category additions and removals.
 
+### 4.5 Reactive Sync State & UI Observability
+- `SyncManager` exposes `isSyncing: StateFlow<Boolean>` that transitions to `true` whenever `syncMutex` is acquired for pull or push operations and resets to `false` in a `finally` block upon completion or failure.
+- Screens consuming sync state (`HistoryTab`, `SettingsSyncScreen`) observe `isSyncing` via `collectAsStateWithLifecycle()`, providing real-time feedback (such as a spinning refresh icon and an indeterminate `LinearProgressIndicator` in the top bar) during both automated background pulls and manual sync actions.
+
 ---
 
 ## 5. Consequences
@@ -83,6 +87,7 @@ We selected **Option A (Outbox Dirty Tracking)** alongside refined lifecycle and
 - **Clock-Skew Immune**: Local push tracking does not depend on remote timestamps matching the local device clock.
 - **No Echo Loops**: Server receives only genuinely local modifications.
 - **Improved UX**: Users can unmark read, re-read chapters, and trust category organization across all devices.
+- **Real-Time Sync Transparency**: Users are visibly informed via live indicators whenever background reconciliation or pushes are actively underway.
 
 ### Negative / Maintenance
 - Schema migration required to add `is_dirty` columns to existing SQLite tables.

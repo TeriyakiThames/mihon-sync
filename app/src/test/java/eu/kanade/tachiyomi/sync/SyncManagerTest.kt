@@ -215,4 +215,64 @@ class SyncManagerTest {
         coVerify(exactly = 1) { apiClient.pullUpdates(sinceTimestamp = 0L) }
         coVerify(exactly = 1) { apiClient.pullUpdates(sinceTimestamp = 1000L) }
     }
+
+    @Test
+    fun `isSyncing is true while pulling and resets to false after completion`() = runBlocking {
+        var observedSyncingDuringCall = false
+        coEvery { apiClient.pullUpdates(any()) } coAnswers {
+            observedSyncingDuringCall = syncManager.isSyncing.value
+            SyncUpdatesResponse(updates = emptyList())
+        }
+
+        assertFalse(syncManager.isSyncing.value)
+        val success = syncManager.pullFromOrigin()
+        assertTrue(success)
+        assertTrue(observedSyncingDuringCall)
+        assertFalse(syncManager.isSyncing.value)
+    }
+
+    @Test
+    fun `isSyncing is true while pushing and resets to false after completion`() = runBlocking {
+        var observedSyncingDuringCall = false
+        coEvery { apiClient.pullUpdates(any()) } returns SyncUpdatesResponse(updates = emptyList())
+        coEvery { diffEngine.extractDiff(any()) } returns SyncPayload(
+            chapters = listOf(
+                eu.kanade.tachiyomi.sync.data.ChapterSyncRecord(
+                    mangaSource = 1L,
+                    mangaUrl = "/manga1",
+                    chapterUrl = "/ch1",
+                    chapterName = "Ch. 1",
+                    read = true,
+                    bookmark = false,
+                    lastPageRead = 10L,
+                    chapterNumber = 1.0,
+                    scanlator = null,
+                    lastModifiedAt = 3L,
+                    version = 1L,
+                ),
+            ),
+        )
+        coEvery { diffEngine.clearLastExtractedDirty() } returns Unit
+        every { lastPushTimestampPref.set(any()) } returns Unit
+        coEvery { apiClient.pushUpdate(any(), any()) } coAnswers {
+            observedSyncingDuringCall = syncManager.isSyncing.value
+            SyncUpdateResponse(success = true, timestamp = 1000L)
+        }
+
+        assertFalse(syncManager.isSyncing.value)
+        val success = syncManager.pushToOrigin()
+        assertTrue(success)
+        assertTrue(observedSyncingDuringCall)
+        assertFalse(syncManager.isSyncing.value)
+    }
+
+    @Test
+    fun `isSyncing resets to false when pull fails with exception`() = runBlocking {
+        coEvery { apiClient.pullUpdates(any()) } throws RuntimeException("Network error")
+
+        assertFalse(syncManager.isSyncing.value)
+        val success = syncManager.pullFromOrigin()
+        assertFalse(success)
+        assertFalse(syncManager.isSyncing.value)
+    }
 }

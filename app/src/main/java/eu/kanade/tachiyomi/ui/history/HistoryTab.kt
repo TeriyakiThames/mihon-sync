@@ -72,7 +72,9 @@ data object HistoryTab : Tab {
         val state by viewModel.state.collectAsStateWithLifecycle()
         val scope = rememberCoroutineScope()
         val syncManager = remember { context.appGraph.syncManager }
-        var isSyncing by remember { mutableStateOf(false) }
+        val isSyncingFromManager by syncManager.isSyncing.collectAsStateWithLifecycle()
+        var isManualSyncing by remember { mutableStateOf(false) }
+        val isSyncing = isSyncingFromManager || isManualSyncing
 
         HistoryScreen(
             state = state,
@@ -86,11 +88,11 @@ data object HistoryTab : Tab {
             onClickSync = {
                 if (isSyncing) return@HistoryScreen
                 scope.launch {
-                    isSyncing = true
+                    isManualSyncing = true
                     val success = try {
                         syncManager.syncNow(force = true)
                     } finally {
-                        isSyncing = false
+                        isManualSyncing = false
                     }
                     val message = if (success) {
                         context.stringResource(MR.strings.sync_success)
