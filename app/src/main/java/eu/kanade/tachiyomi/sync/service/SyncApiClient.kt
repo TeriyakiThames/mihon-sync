@@ -65,6 +65,34 @@ class SyncApiClient(
     }
 
     /**
+     * Pushes a full encrypted snapshot to the backend server via POST /api/sync with isSnapshot = true.
+     */
+    suspend fun pushSnapshot(payloadCiphertext: String, timestamp: Long): SyncUpdateResponse {
+        val serverUrl = syncPreferences.serverUrl.get().trim().trimEnd('/')
+        val roomId = syncPreferences.roomId.get().trim()
+        val deviceId = syncPreferences.deviceId.get()
+
+        require(serverUrl.isNotBlank()) { "Sync server URL is not configured" }
+        require(roomId.isNotBlank()) { "Sync room ID is not configured" }
+
+        val requestObj = SyncPushRequest(
+            roomId = roomId,
+            timestamp = timestamp,
+            payload = payloadCiphertext,
+            deviceId = deviceId,
+            isSnapshot = true,
+        )
+
+        val jsonString = syncJson.encodeToString(requestObj)
+        val body = jsonString.toRequestBody(jsonMime)
+        val request = POST("$serverUrl/api/sync", body = body, cache = CacheControl.FORCE_NETWORK)
+
+        val response = client.newCall(request).awaitSuccess()
+        val responseBody = response.body.string()
+        return syncJson.decodeFromString(responseBody)
+    }
+
+    /**
      * Pulls encrypted updates recorded after [sinceTimestamp] from GET /api/sync.
      */
     suspend fun pullUpdates(sinceTimestamp: Long): SyncUpdatesResponse {

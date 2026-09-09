@@ -128,4 +128,39 @@ class SyncManagerTest {
 
         coVerify(exactly = 1) { apiClient.pullUpdates(any()) }
     }
+
+    @Test
+    fun `merges snapshot first when pullResponse contains a snapshot`() = runBlocking {
+        val key = "c2VjcmV0LWtleS0zMi1ieXRlcy1sb25nISEhISE="
+        val encryptedSnapshot = eu.kanade.tachiyomi.sync.crypto.CryptoUtil.encryptString("{}", key)
+
+        coEvery { apiClient.pullUpdates(any()) } returns SyncUpdatesResponse(
+            snapshot = eu.kanade.tachiyomi.sync.data.SyncSnapshotRecord(
+                id = "snap-1",
+                timestamp = 5000L,
+                payload = encryptedSnapshot,
+            ),
+            updates = emptyList(),
+        )
+
+        val success = syncManager.syncNow(force = true)
+
+        assertTrue(success)
+        coVerify(exactly = 1) { merger.merge(any()) }
+    }
+
+    @Test
+    fun `opportunistically pushes snapshot when pullResponse has needsSnapshot true`() = runBlocking {
+        coEvery { apiClient.pullUpdates(any()) } returns SyncUpdatesResponse(
+            needsSnapshot = true,
+            updates = emptyList(),
+        )
+        coEvery { apiClient.pushSnapshot(any(), any()) } returns SyncUpdateResponse(success = true, timestamp = 2000L)
+
+        val success = syncManager.syncNow(force = true)
+
+        assertTrue(success)
+        coVerify(atLeast = 1) { diffEngine.extractDiff(sinceTimestampMillis = 0L) }
+        coVerify(exactly = 1) { apiClient.pushSnapshot(any(), any()) }
+    }
 }

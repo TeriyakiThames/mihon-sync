@@ -90,6 +90,7 @@ data class SyncPushRequest(
     val timestamp: Long,
     val payload: String, // Base64 AES-256-GCM ciphertext
     val deviceId: String? = null,
+    val isSnapshot: Boolean? = null,
 )
 
 /**
@@ -101,6 +102,8 @@ data class SyncUpdateResponse(
     val updateId: String? = null,
     val id: String? = null,
     val timestamp: Long? = null,
+    val isSnapshot: Boolean? = null,
+    val snapshotId: String? = null,
     val error: String? = null,
 )
 
@@ -117,6 +120,18 @@ data class SyncUpdateRecord(
 )
 
 /**
+ * An encrypted snapshot record received from GET /api/sync.
+ */
+@Serializable
+data class SyncSnapshotRecord(
+    val id: String,
+    val roomId: String? = null,
+    val timestamp: Long,
+    val payload: String, // Base64 AES-256-GCM ciphertext
+    val deviceId: String? = null,
+)
+
+/**
  * Response from GET /api/sync?roomId=...&since=...
  */
 @Serializable
@@ -125,6 +140,8 @@ data class SyncUpdatesResponse(
     val roomId: String? = null,
     val since: Long? = null,
     val count: Int = 0,
+    val needsSnapshot: Boolean = false,
+    val snapshot: SyncSnapshotRecord? = null,
     val updates: List<SyncUpdateRecord> = emptyList(),
     val error: String? = null,
 )

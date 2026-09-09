@@ -103,6 +103,23 @@ class SyncManager(
                 val pullResponse = apiClient.pullUpdates(sinceTimestamp = lastSyncTime)
                 var maxObservedTimestamp = lastSyncTime
 
+                // 1a. If server provided a snapshot (gap recovery or first sync), merge snapshot first
+                val snapshot = pullResponse.snapshot
+                if (snapshot != null) {
+                    if (snapshot.timestamp > maxObservedTimestamp) {
+                        maxObservedTimestamp = snapshot.timestamp
+                    }
+                    try {
+                        val decryptedSnapshotJson = CryptoUtil.decryptString(snapshot.payload, encryptionKey)
+                        val snapshotPayload = json.decodeFromString<SyncPayload>(decryptedSnapshotJson)
+                        merger.merge(snapshotPayload)
+                    } catch (e: Exception) {
+                        logcat(LogPriority.ERROR, e) { "Failed to decrypt or merge snapshot ${snapshot.id}" }
+                        throw e
+                    }
+                }
+
+                // 1b. Apply incremental updates
                 for (update in pullResponse.updates) {
                     if (update.timestamp > maxObservedTimestamp) {
                         maxObservedTimestamp = update.timestamp
@@ -124,6 +141,24 @@ class SyncManager(
                 }
 
                 // Phase 2: Diff local changes and push
+                // 2a. Opportunistic full snapshot upload if server requested one
+                if (pullResponse.needsSnapshot) {
+                    try {
+                        val fullSnapshotDiff = diffEngine.extractDiff(sinceTimestampMillis = 0L)
+                        val fullSnapshotJson = json.encodeToString(fullSnapshotDiff)
+                        val encryptedSnapshot = CryptoUtil.encryptString(fullSnapshotJson, encryptionKey)
+                        val snapshotTimestamp = System.currentTimeMillis()
+                        val snapshotResponse = apiClient.pushSnapshot(encryptedSnapshot, snapshotTimestamp)
+                        val serverSnapshotTs = snapshotResponse.timestamp ?: snapshotTimestamp
+                        if (serverSnapshotTs > maxObservedTimestamp) {
+                            maxObservedTimestamp = serverSnapshotTs
+                        }
+                    } catch (e: Exception) {
+                        logcat(LogPriority.WARN, e) { "Failed to push opportunistic snapshot" }
+                    }
+                }
+
+                // 2b. Diff local incremental changes and push
                 val localDiff = diffEngine.extractDiff(sinceTimestampMillis = lastSyncTime)
                 val hasChanges = localDiff.chapters.isNotEmpty() ||
                     localDiff.history.isNotEmpty() ||
