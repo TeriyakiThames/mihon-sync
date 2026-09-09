@@ -605,7 +605,7 @@ class MainActivity : BaseActivity() {
 
     override fun onResume() {
         super.onResume()
-        appGraph.syncManager.triggerSync(0L)
+        appGraph.syncManager.triggerSync(1500L)
     }
 
     override fun onPause() {

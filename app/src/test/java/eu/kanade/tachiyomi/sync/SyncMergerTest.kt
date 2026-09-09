@@ -2,8 +2,10 @@ package eu.kanade.tachiyomi.sync
 
 import app.cash.sqldelight.Query
 import app.cash.sqldelight.SuspendingTransactionWithoutReturn
+import app.cash.sqldelight.async.coroutines.awaitAsOne
 import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
+import eu.kanade.tachiyomi.sync.data.CategorySyncRecord
 import eu.kanade.tachiyomi.sync.data.ChapterSyncRecord
 import eu.kanade.tachiyomi.sync.data.HistorySyncRecord
 import eu.kanade.tachiyomi.sync.data.MangaSyncRecord
@@ -245,5 +247,212 @@ class SyncMergerTest {
 
         coVerify(exactly = 1) { syncQueries.resetAllChapterIsSyncing() }
         coVerify(exactly = 1) { syncQueries.resetAllMangaIsSyncing() }
+    }
+
+    @Test
+    fun `merge inserts new manga and chapter when none exist locally`() = runBlocking {
+        val mangaQuery = mockk<Query<Mangas>>()
+        coEvery { mangaQuery.awaitAsOneOrNull() } returns null
+        every { syncQueries.getMangaBySourceAndUrl(100L, "/manga/new") } returns mangaQuery
+
+        val insertMangaQuery = mockk<Query<Long>>()
+        coEvery { insertMangaQuery.awaitAsOne() } returns 55L
+        every {
+            syncQueries.insertSyncManga(
+                source = 100L,
+                url = "/manga/new",
+                artist = null,
+                author = null,
+                description = null,
+                genre = emptyList(),
+                title = "New Manga",
+                status = 1L,
+                thumbnailUrl = null,
+                favorite = true,
+                chapterFlags = 0L,
+                viewerFlags = 0L,
+                dateAdded = 1000L,
+                lastModifiedAt = 1000L,
+                favoriteModifiedAt = null,
+                version = 1L,
+            )
+        } returns insertMangaQuery
+
+        val chapterQuery = mockk<Query<Chapters>>()
+        coEvery { chapterQuery.awaitAsOneOrNull() } returns null
+        every { syncQueries.getChapterByMangaIdAndUrl(55L, "/chapter/new1") } returns chapterQuery
+
+        val insertChapterQuery = mockk<Query<Long>>()
+        coEvery { insertChapterQuery.awaitAsOne() } returns 505L
+        every {
+            syncQueries.insertSyncChapter(
+                mangaId = 55L,
+                url = "/chapter/new1",
+                name = "Chapter 1",
+                scanlator = null,
+                read = false,
+                bookmark = false,
+                lastPageRead = 3L,
+                chapterNumber = 1.0,
+                lastModifiedAt = 1000L,
+                version = 1L,
+            )
+        } returns insertChapterQuery
+
+        val payload = SyncPayload(
+            mangas = listOf(
+                MangaSyncRecord(
+                    source = 100L,
+                    url = "/manga/new",
+                    title = "New Manga",
+                    favorite = true,
+                    status = 1L,
+                    dateAdded = 1000L,
+                    lastModifiedAt = 1000L,
+                    version = 1L,
+                )
+            ),
+            chapters = listOf(
+                ChapterSyncRecord(
+                    mangaSource = 100L,
+                    mangaUrl = "/manga/new",
+                    chapterUrl = "/chapter/new1",
+                    chapterName = "Chapter 1",
+                    read = false,
+                    bookmark = false,
+                    lastPageRead = 3L,
+                    chapterNumber = 1.0,
+                    lastModifiedAt = 1000L,
+                    version = 1L,
+                )
+            ),
+        )
+
+        merger.merge(payload)
+
+        coVerify(exactly = 1) { insertMangaQuery.awaitAsOne() }
+        coVerify(exactly = 1) { insertChapterQuery.awaitAsOne() }
+    }
+
+    @Test
+    fun `merge applies safe read resolution and does not mark in-progress chapter read when remote is older`() = runBlocking {
+        val localManga = mockk<Mangas>(relaxed = true)
+        every { localManga._id } returns 1L
+        val mangaQuery = mockk<Query<Mangas>>()
+        coEvery { mangaQuery.awaitAsOneOrNull() } returns localManga
+        every { syncQueries.getMangaBySourceAndUrl(100L, "/manga/1") } returns mangaQuery
+
+        val localChapter = Chapters(
+            _id = 10L,
+            manga_id = 1L,
+            url = "/chapter/1",
+            name = "Chapter 1",
+            scanlator = null,
+            read = false,
+            bookmark = false,
+            last_page_read = 8L,
+            chapter_number = 1.0,
+            source_order = 0L,
+            date_fetch = 0L,
+            date_upload = 0L,
+            last_modified_at = 2000L,
+            version = 5L,
+            is_syncing = 0L,
+            memo = JsonObject(emptyMap()),
+        )
+
+        val chapterQuery = mockk<Query<Chapters>>()
+        coEvery { chapterQuery.awaitAsOneOrNull() } returns localChapter
+        every { syncQueries.getChapterByMangaIdAndUrl(1L, "/chapter/1") } returns chapterQuery
+
+        val payload = SyncPayload(
+            chapters = listOf(
+                ChapterSyncRecord(
+                    mangaSource = 100L,
+                    mangaUrl = "/manga/1",
+                    chapterUrl = "/chapter/1",
+                    read = true,
+                    bookmark = false,
+                    lastPageRead = 2L,
+                    version = 3L,
+                    lastModifiedAt = 1000L,
+                )
+            ),
+        )
+
+        merger.merge(payload)
+
+        coVerify(exactly = 0) {
+            chaptersQueries.update(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any())
+        }
+    }
+
+    @Test
+    fun `merge advances lastPageRead monotonically when remote has higher page`() = runBlocking {
+        val localManga = mockk<Mangas>(relaxed = true)
+        every { localManga._id } returns 1L
+        val mangaQuery = mockk<Query<Mangas>>()
+        coEvery { mangaQuery.awaitAsOneOrNull() } returns localManga
+        every { syncQueries.getMangaBySourceAndUrl(100L, "/manga/1") } returns mangaQuery
+
+        val localChapter = Chapters(
+            _id = 10L,
+            manga_id = 1L,
+            url = "/chapter/1",
+            name = "Chapter 1",
+            scanlator = null,
+            read = false,
+            bookmark = false,
+            last_page_read = 3L,
+            chapter_number = 1.0,
+            source_order = 0L,
+            date_fetch = 0L,
+            date_upload = 0L,
+            last_modified_at = 1000L,
+            version = 1L,
+            is_syncing = 0L,
+            memo = JsonObject(emptyMap()),
+        )
+
+        val chapterQuery = mockk<Query<Chapters>>()
+        coEvery { chapterQuery.awaitAsOneOrNull() } returns localChapter
+        every { syncQueries.getChapterByMangaIdAndUrl(1L, "/chapter/1") } returns chapterQuery
+
+        val payload = SyncPayload(
+            chapters = listOf(
+                ChapterSyncRecord(
+                    mangaSource = 100L,
+                    mangaUrl = "/manga/1",
+                    chapterUrl = "/chapter/1",
+                    read = false,
+                    bookmark = false,
+                    lastPageRead = 7L,
+                    version = 2L,
+                    lastModifiedAt = 2000L,
+                )
+            ),
+        )
+
+        merger.merge(payload)
+
+        coVerify(exactly = 1) {
+            chaptersQueries.update(
+                chapterId = 10L,
+                mangaId = null,
+                url = null,
+                name = null,
+                scanlator = null,
+                read = false,
+                bookmark = false,
+                lastPageRead = 7L,
+                chapterNumber = null,
+                sourceOrder = null,
+                dateFetch = null,
+                dateUpload = null,
+                version = null,
+                isSyncing = 1L,
+                memo = null,
+            )
+        }
     }
 }

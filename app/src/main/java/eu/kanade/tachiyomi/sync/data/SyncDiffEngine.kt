@@ -100,6 +100,19 @@ class SyncDiffEngine(
             )
         }
 
+        // 4. Extract categories
+        val categoryRows = database.syncQueries
+            .getAllCategories()
+            .awaitAsList()
+
+        val categories = categoryRows.map { row ->
+            CategorySyncRecord(
+                name = row.name,
+                order = row.order,
+                flags = row.flags,
+            )
+        }
+
         val deviceId = syncPreferences?.deviceId?.get() ?: ""
 
         return SyncPayload(
@@ -108,7 +121,7 @@ class SyncDiffEngine(
             mangas = mangas,
             chapters = chapters,
             history = history,
-            categories = emptyList(),
+            categories = categories,
             settings = emptyMap(),
         )
     }

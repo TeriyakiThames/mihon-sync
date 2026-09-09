@@ -217,13 +217,6 @@ class ReaderActivity : BaseActivity() {
             .onEach(::setChapters)
             .launchIn(lifecycleScope)
 
-        viewModel.state
-            .map { it.viewerChapters?.currChapter?.chapter?.id }
-            .distinctUntilChanged()
-            .filterNotNull()
-            .drop(1)
-            .onEach { graph.syncManager.triggerSync() }
-            .launchIn(lifecycleScope)
 
         viewModel.eventFlow
             .onEach { event ->
@@ -355,9 +348,9 @@ class ReaderActivity : BaseActivity() {
     override fun onPause() {
         lifecycleScope.launchNonCancellable {
             viewModel.updateHistory()
+            graph.syncManager.triggerSync()
         }
         super.onPause()
-        graph.syncManager.triggerSync()
     }
 
     /**

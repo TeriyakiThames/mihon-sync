@@ -20,7 +20,8 @@ SELECT
     C.version
 FROM chapters C
 JOIN mangas M ON C.manga_id = M._id
-WHERE C.last_modified_at > :sinceSeconds;
+WHERE (:sinceSeconds = 0 AND (C.read = 1 OR C.last_page_read > 0 OR C.bookmark = 1))
+   OR (:sinceSeconds > 0 AND C.last_modified_at >= :sinceSeconds);
 
 -- Extract history records modified since given Date/millis, joined with manga & chapter identity
 getModifiedHistory:
@@ -57,7 +58,8 @@ SELECT
     M.favorite_modified_at AS favoriteModifiedAt,
     M.version
 FROM mangas M
-WHERE M.favorite = 1 AND M.last_modified_at > :sinceSeconds;
+WHERE (:sinceSeconds = 0 AND M.favorite = 1)
+   OR (:sinceSeconds > 0 AND (M.last_modified_at >= :sinceSeconds OR (M.favorite_modified_at IS NOT NULL AND M.favorite_modified_at >= :sinceSeconds)));
 
 -- Extract categories associated with a manga
 getCategoriesForManga:
@@ -89,6 +91,55 @@ SELECT *
 FROM categories
 WHERE name = :name
 LIMIT 1;
+
+-- Extract all user categories
+getAllCategories:
+SELECT
+    _id AS id,
+    name,
+    sort AS `order`,
+    flags
+FROM categories
+WHERE _id > 0;
+
+-- Helper to insert category
+insertCategory:
+INSERT INTO categories(name, sort, flags)
+VALUES (:name, :order, :flags)
+RETURNING _id;
+
+-- Helper to associate manga with category
+insertMangaCategory:
+INSERT OR IGNORE INTO mangas_categories(manga_id, category_id)
+VALUES (:mangaId, :categoryId);
+
+-- Insert a remote manga with is_syncing = 1
+insertSyncManga:
+INSERT INTO mangas(
+    source, url, artist, author, description, genre, title, status, thumbnail_url, favorite,
+    last_update, next_update, initialized, viewer, chapter_flags, cover_last_modified, date_added,
+    update_strategy, calculate_interval, last_modified_at, favorite_modified_at, version, is_syncing
+)
+VALUES (
+    :source, :url, :artist, :author, :description, :genre, :title, :status, :thumbnailUrl, :favorite,
+    0, 0, 0, :viewerFlags, :chapterFlags, 0, :dateAdded,
+    0, 0, :lastModifiedAt, :favoriteModifiedAt, :version, 1
+)
+RETURNING _id;
+
+-- Insert a remote chapter with is_syncing = 1
+insertSyncChapter:
+INSERT INTO chapters(
+    manga_id, url, name, scanlator, read, bookmark, last_page_read,
+    chapter_number, source_order, date_fetch, date_upload,
+    last_modified_at, version, is_syncing
+)
+VALUES (
+    :mangaId, :url, :name, :scanlator, :read, :bookmark, :lastPageRead,
+    :chapterNumber, 0, 0, 0,
+    :lastModifiedAt, :version, 1
+)
+RETURNING _id;
 
 
 

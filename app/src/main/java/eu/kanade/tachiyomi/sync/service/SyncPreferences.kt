@@ -37,10 +37,16 @@ class SyncPreferences(
         false,
     )
 
-    val deviceId: Preference<String> = preferenceStore.getString(
-        Preference.appStateKey("sync_device_id"),
-        UUID.randomUUID().toString(),
-    )
+    val deviceId: Preference<String> by lazy {
+        val pref = preferenceStore.getString(
+            Preference.appStateKey("sync_device_id"),
+            "",
+        )
+        if (pref.get().isBlank()) {
+            pref.set(UUID.randomUUID().toString())
+        }
+        pref
+    }
 
     fun isConfigured(): Boolean {
         return serverUrl.get().isNotBlank() &&
