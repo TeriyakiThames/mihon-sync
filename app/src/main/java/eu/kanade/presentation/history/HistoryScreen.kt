@@ -3,10 +3,20 @@ package eu.kanade.presentation.history
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.items
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.tooling.preview.PreviewLightDark
 import androidx.compose.ui.tooling.preview.PreviewParameter
 import eu.kanade.presentation.components.AppBar
@@ -20,7 +30,7 @@ import eu.kanade.tachiyomi.ui.history.HistoryViewModel
 import kotlinx.datetime.LocalDate
 import mihon.icons.materialsymbols.MaterialSymbols
 import mihon.icons.materialsymbols.rounded.DeleteSweep
-import mihon.icons.materialsymbols.rounded.Sync
+import mihon.icons.materialsymbols.rounded.Refresh
 import tachiyomi.domain.history.model.HistoryWithRelations
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.FastScrollLazyColumn
@@ -39,6 +49,7 @@ fun HistoryScreen(
     onClickResume: (mangaId: Long, chapterId: Long) -> Unit,
     onClickFavorite: (mangaId: Long) -> Unit,
     onDialogChange: (HistoryViewModel.Dialog?) -> Unit,
+    isSyncing: Boolean = false,
     onClickSync: () -> Unit,
 ) {
     Scaffold(
@@ -48,15 +59,38 @@ fun HistoryScreen(
                 searchQuery = state.searchQuery,
                 onChangeSearchQuery = onSearchQueryChange,
                 preActions = {
-                    AppBarActions(
-                        listOf(
-                            AppBar.Action(
-                                title = stringResource(MR.strings.pref_sync_now),
-                                icon = MaterialSymbols.Rounded.Sync,
-                                onClick = onClickSync,
+                    if (isSyncing) {
+                        val infiniteTransition = rememberInfiniteTransition(label = "sync_rotation")
+                        val angle by infiniteTransition.animateFloat(
+                            initialValue = 0f,
+                            targetValue = 360f,
+                            animationSpec = infiniteRepeatable(
+                                animation = tween(1000, easing = LinearEasing),
+                                repeatMode = RepeatMode.Restart,
                             ),
-                        ),
-                    )
+                            label = "sync_angle",
+                        )
+                        IconButton(
+                            onClick = {},
+                            enabled = false,
+                        ) {
+                            Icon(
+                                imageVector = MaterialSymbols.Rounded.Refresh,
+                                contentDescription = stringResource(MR.strings.sync_in_progress),
+                                modifier = Modifier.rotate(angle),
+                            )
+                        }
+                    } else {
+                        AppBarActions(
+                            listOf(
+                                AppBar.Action(
+                                    title = stringResource(MR.strings.pref_sync_now),
+                                    icon = MaterialSymbols.Rounded.Refresh,
+                                    onClick = onClickSync,
+                                ),
+                            ),
+                        )
+                    }
                 },
                 actions = {
                     AppBarActions(

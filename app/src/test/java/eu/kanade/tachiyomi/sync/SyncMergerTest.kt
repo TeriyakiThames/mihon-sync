@@ -2,6 +2,7 @@ package eu.kanade.tachiyomi.sync
 
 import app.cash.sqldelight.Query
 import app.cash.sqldelight.SuspendingTransactionWithoutReturn
+import app.cash.sqldelight.async.coroutines.awaitAsList
 import app.cash.sqldelight.async.coroutines.awaitAsOne
 import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
 import eu.kanade.tachiyomi.source.model.UpdateStrategy
@@ -112,6 +113,7 @@ class SyncMergerTest {
             favorite_modified_at = 1000L,
             version = 1L,
             is_syncing = 0L,
+            is_dirty = 0L,
             notes = "",
             memo = JsonObject(emptyMap()),
         )
@@ -132,6 +134,7 @@ class SyncMergerTest {
             last_modified_at = 1000L,
             version = 1L,
             is_syncing = 0L,
+            is_dirty = 0L,
             memo = JsonObject(emptyMap()),
         )
 
@@ -143,9 +146,13 @@ class SyncMergerTest {
         coEvery { chapterQuery.awaitAsOneOrNull() } returns localChapter
         every { syncQueries.getChapterByMangaIdAndUrl(1L, "/chapter/1") } returns chapterQuery
 
-        val historyQuery = mockk<Query<tachiyomi.data.History>>()
+        val historyQuery = mockk<Query<tachiyomi.data.GetHistoryByChapterUrlAndMangaId>>()
         coEvery { historyQuery.awaitAsOneOrNull() } returns null
         every { historyQueries.getHistoryByChapterUrlAndMangaId(any(), any()) } returns historyQuery
+
+        val catQuery = mockk<Query<tachiyomi.data.GetCategoriesForManga>>()
+        coEvery { catQuery.awaitAsList() } returns emptyList()
+        every { syncQueries.getCategoriesForManga(any()) } returns catQuery
 
         val payload = SyncPayload(
             chapters = listOf(
@@ -238,7 +245,7 @@ class SyncMergerTest {
         }
 
         coVerify(exactly = 1) {
-            historyQueries.upsert(
+            syncQueries.upsertSyncHistory(
                 chapterId = 10L,
                 readAt = Date(2000000L),
                 time_read = 500L,
@@ -360,6 +367,7 @@ class SyncMergerTest {
             last_modified_at = 2000L,
             version = 5L,
             is_syncing = 0L,
+            is_dirty = 0L,
             memo = JsonObject(emptyMap()),
         )
 
@@ -413,6 +421,7 @@ class SyncMergerTest {
             last_modified_at = 1000L,
             version = 1L,
             is_syncing = 0L,
+            is_dirty = 0L,
             memo = JsonObject(emptyMap()),
         )
 
@@ -454,6 +463,54 @@ class SyncMergerTest {
                 version = null,
                 isSyncing = 1L,
                 memo = null,
+            )
+        }
+    }
+
+    @Test
+    fun `merge history calculates delta duration to avoid duration inflation`() = runBlocking {
+        val localManga = mockk<Mangas>(relaxed = true)
+        every { localManga._id } returns 1L
+        val mangaQuery = mockk<Query<Mangas>>()
+        coEvery { mangaQuery.awaitAsOneOrNull() } returns localManga
+        every { syncQueries.getMangaBySourceAndUrl(100L, "/manga/1") } returns mangaQuery
+
+        val localChapter = mockk<Chapters>(relaxed = true)
+        every { localChapter._id } returns 10L
+        val chapterQuery = mockk<Query<Chapters>>()
+        coEvery { chapterQuery.awaitAsOneOrNull() } returns localChapter
+        every { syncQueries.getChapterByMangaIdAndUrl(1L, "/chapter/1") } returns chapterQuery
+
+        val localHistory = tachiyomi.data.GetHistoryByChapterUrlAndMangaId(
+            _id = 5L,
+            chapter_id = 10L,
+            last_read = Date(1000L),
+            time_read = 300L,
+        )
+        val historyQuery = mockk<Query<tachiyomi.data.GetHistoryByChapterUrlAndMangaId>>()
+        coEvery { historyQuery.awaitAsOneOrNull() } returns localHistory
+        every { historyQueries.getHistoryByChapterUrlAndMangaId("/chapter/1", 1L) } returns historyQuery
+
+        val payload = SyncPayload(
+            history = listOf(
+                HistorySyncRecord(
+                    mangaSource = 100L,
+                    mangaUrl = "/manga/1",
+                    chapterUrl = "/chapter/1",
+                    lastRead = 2000L,
+                    timeRead = 500L,
+                )
+            ),
+        )
+
+        merger.merge(payload)
+
+        // Delta should be 500L - 300L = 200L passed to upsertSyncHistory
+        coVerify(exactly = 1) {
+            syncQueries.upsertSyncHistory(
+                chapterId = 10L,
+                readAt = Date(2000L),
+                time_read = 200L,
             )
         }
     }

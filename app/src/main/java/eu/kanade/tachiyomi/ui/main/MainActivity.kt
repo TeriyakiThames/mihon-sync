@@ -605,12 +605,12 @@ class MainActivity : BaseActivity() {
 
     override fun onResume() {
         super.onResume()
-        appGraph.syncManager.triggerSync(1500L)
+        appGraph.syncManager.triggerPull(skipIfRecentMs = 3000L)
     }
 
     override fun onPause() {
         super.onPause()
-        appGraph.syncManager.triggerSync()
+        appGraph.syncManager.triggerPush(debounceDelayMs = 0L)
     }
 
     companion object {

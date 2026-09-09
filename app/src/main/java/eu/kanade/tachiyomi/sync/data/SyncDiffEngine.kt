@@ -22,6 +22,15 @@ class SyncDiffEngine(
     private val syncPreferences: SyncPreferences? = null,
 ) {
 
+    @Volatile
+    private var lastExtractedChapterIds: List<Long> = emptyList()
+
+    @Volatile
+    private var lastExtractedMangaIds: List<Long> = emptyList()
+
+    @Volatile
+    private var lastExtractedHistoryIds: List<Long> = emptyList()
+
     /**
      * Extracts all modified chapters, history records, and mangas since [sinceTimestampMillis].
      *
@@ -36,6 +45,7 @@ class SyncDiffEngine(
         val chapterRows = database.syncQueries
             .getModifiedChapters(sinceSeconds)
             .awaitAsList()
+        lastExtractedChapterIds = chapterRows.map { it.chapterId }
 
         val chapters = chapterRows.map { row ->
             ChapterSyncRecord(
@@ -55,8 +65,9 @@ class SyncDiffEngine(
 
         // 2. Extract modified history
         val historyRows = database.syncQueries
-            .getModifiedHistory(sinceDate)
+            .getModifiedHistory(sinceTimestampMillis)
             .awaitAsList()
+        lastExtractedHistoryIds = historyRows.map { it.historyId }
 
         val history = historyRows.map { row ->
             HistorySyncRecord(
@@ -72,6 +83,7 @@ class SyncDiffEngine(
         val mangaRows = database.syncQueries
             .getModifiedMangas(sinceSeconds)
             .awaitAsList()
+        lastExtractedMangaIds = mangaRows.map { it.mangaId }
 
         val mangas = mangaRows.map { row ->
             val categories = database.syncQueries
@@ -124,5 +136,27 @@ class SyncDiffEngine(
             categories = categories,
             settings = emptyMap(),
         )
+    }
+
+    /**
+     * Clears the is_dirty flags on entities that were extracted in the most recent extractDiff call.
+     * This is invoked after successfully pushing changes to origin.
+     */
+    suspend fun clearLastExtractedDirty() {
+        val chapterIds = lastExtractedChapterIds
+        val mangaIds = lastExtractedMangaIds
+        val historyIds = lastExtractedHistoryIds
+
+        database.transaction {
+            if (chapterIds.isNotEmpty()) {
+                database.syncQueries.clearDirtyChaptersByIds(chapterIds)
+            }
+            if (mangaIds.isNotEmpty()) {
+                database.syncQueries.clearDirtyMangasByIds(mangaIds)
+            }
+            if (historyIds.isNotEmpty()) {
+                database.syncQueries.clearDirtyHistoryByIds(historyIds)
+            }
+        }
     }
 }

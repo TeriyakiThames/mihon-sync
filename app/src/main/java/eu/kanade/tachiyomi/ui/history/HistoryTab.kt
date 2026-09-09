@@ -8,8 +8,10 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import cafe.adriel.voyager.navigator.LocalNavigator
@@ -70,6 +72,7 @@ data object HistoryTab : Tab {
         val state by viewModel.state.collectAsStateWithLifecycle()
         val scope = rememberCoroutineScope()
         val syncManager = remember { context.appGraph.syncManager }
+        var isSyncing by remember { mutableStateOf(false) }
 
         HistoryScreen(
             state = state,
@@ -79,9 +82,16 @@ data object HistoryTab : Tab {
             onClickResume = viewModel::getNextChapterForManga,
             onDialogChange = viewModel::setDialog,
             onClickFavorite = viewModel::addFavorite,
+            isSyncing = isSyncing,
             onClickSync = {
+                if (isSyncing) return@HistoryScreen
                 scope.launch {
-                    val success = syncManager.syncNow(force = true)
+                    isSyncing = true
+                    val success = try {
+                        syncManager.syncNow(force = true)
+                    } finally {
+                        isSyncing = false
+                    }
                     val message = if (success) {
                         context.stringResource(MR.strings.sync_success)
                     } else {

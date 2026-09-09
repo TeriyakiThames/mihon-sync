@@ -32,6 +32,16 @@ class SyncPreferences(
         0L,
     )
 
+    val lastPullTimestamp: Preference<Long> = preferenceStore.getLong(
+        "sync_last_pull_timestamp",
+        0L,
+    )
+
+    val lastPushTimestamp: Preference<Long> = preferenceStore.getLong(
+        "sync_last_push_timestamp",
+        0L,
+    )
+
     val isSyncEnabled: Preference<Boolean> = preferenceStore.getBoolean(
         "sync_enabled",
         false,
@@ -59,6 +69,8 @@ class SyncPreferences(
         roomId.delete()
         encryptionKey.delete()
         lastSyncTimestamp.delete()
+        lastPullTimestamp.delete()
+        lastPushTimestamp.delete()
         isSyncEnabled.delete()
     }
 }

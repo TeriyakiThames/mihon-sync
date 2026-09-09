@@ -29,6 +29,7 @@ CREATE TABLE mangas(
     favorite_modified_at INTEGER,
     version INTEGER NOT NULL DEFAULT 0,
     is_syncing INTEGER NOT NULL DEFAULT 0,
+    is_dirty INTEGER NOT NULL DEFAULT 0,
     notes TEXT NOT NULL DEFAULT "",
     memo BLOB AS JsonObject NOT NULL DEFAULT '{}'
 );
@@ -39,18 +40,20 @@ CREATE INDEX idx_mangas_source ON mangas(source);
 
 CREATE TRIGGER update_last_favorited_at_mangas
 AFTER UPDATE OF favorite ON mangas
+WHEN new.is_syncing = 0 AND old.is_syncing = 0
 BEGIN
   UPDATE mangas
-  SET favorite_modified_at = strftime('%s', 'now')
+  SET favorite_modified_at = strftime('%s', 'now'), is_dirty = 1
   WHERE _id = new._id;
 END;
 
 CREATE TRIGGER update_last_modified_at_mangas
 AFTER UPDATE ON mangas
 FOR EACH ROW
+WHEN new.is_syncing = 0 AND old.is_syncing = 0
 BEGIN
   UPDATE mangas
-  SET last_modified_at = strftime('%s', 'now')
+  SET last_modified_at = strftime('%s', 'now'), is_dirty = 1
   WHERE _id = new._id;
 END;
 

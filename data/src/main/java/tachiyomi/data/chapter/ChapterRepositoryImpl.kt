@@ -154,6 +154,7 @@ class ChapterRepositoryImpl(
         lastModifiedAt: Long,
         version: Long,
         isSyncing: Long,
+        isDirty: Long,
         memo: JsonObject,
     ): Chapter = Chapter(
         id = id,

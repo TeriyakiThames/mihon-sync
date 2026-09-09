@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.sync.data
 
+import app.cash.sqldelight.async.coroutines.awaitAsList
 import app.cash.sqldelight.async.coroutines.awaitAsOne
 import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
 import dev.zacsweers.metro.AppScope
@@ -41,6 +42,12 @@ class SyncMerger(
                         order = remoteCategory.order,
                         flags = remoteCategory.flags,
                     ).awaitAsOne()
+                } else if (localCategory.sort != remoteCategory.order || localCategory.flags != remoteCategory.flags) {
+                    database.syncQueries.updateCategory(
+                        id = localCategory._id,
+                        order = remoteCategory.order,
+                        flags = remoteCategory.flags,
+                    )
                 }
             }
 
@@ -114,12 +121,19 @@ class SyncMerger(
                         }
                     }
 
-                    for (categoryName in remoteManga.categories) {
-                        val category = database.syncQueries
-                            .getCategoryByName(categoryName)
-                            .awaitAsOneOrNull()
-                        if (category != null) {
-                            database.syncQueries.insertMangaCategory(localManga._id, category._id)
+                    val currentCategories = database.syncQueries.getCategoriesForManga(localManga._id).awaitAsList()
+                    val currentCategoryNames = currentCategories.map { it.name }.toSet()
+                    val remoteCategoryNames = remoteManga.categories.toSet()
+
+                    if (currentCategoryNames != remoteCategoryNames) {
+                        database.syncQueries.deleteMangaCategoriesForManga(localManga._id)
+                        for (categoryName in remoteManga.categories) {
+                            val category = database.syncQueries
+                                .getCategoryByName(categoryName)
+                                .awaitAsOneOrNull()
+                            if (category != null) {
+                                database.syncQueries.insertMangaCategory(localManga._id, category._id)
+                            }
                         }
                     }
                 }
@@ -152,23 +166,11 @@ class SyncMerger(
                     val isRemoteNewer = remoteChapter.version > localChapter.version ||
                         remoteChapter.lastModifiedAt > localChapter.last_modified_at
 
-                    // Safe read resolution: do not mark unread or in-progress chapters as read
-                    // unless already read locally, or remote is marked read with a strictly newer timestamp/version
-                    val newRead = when {
-                        localChapter.read -> true
-                        remoteChapter.read && isRemoteNewer -> true
-                        else -> false
-                    }
-
-                    // Forward progress: max page read
-                    val newLastPageRead = maxOf(localChapter.last_page_read, remoteChapter.lastPageRead)
-
-                    // LWW for bookmark
-                    val newBookmark = if (isRemoteNewer) {
-                        remoteChapter.bookmark
-                    } else {
-                        localChapter.bookmark
-                    }
+                    // Last-Write-Wins (LWW) conflict resolution: if remote is strictly newer,
+                    // accept its read status, page progress, and bookmark.
+                    val newRead = if (isRemoteNewer) remoteChapter.read else localChapter.read
+                    val newLastPageRead = if (isRemoteNewer) remoteChapter.lastPageRead else localChapter.last_page_read
+                    val newBookmark = if (isRemoteNewer) remoteChapter.bookmark else localChapter.bookmark
 
                     // Only update if state has changed
                     if (newRead != localChapter.read ||
@@ -211,11 +213,14 @@ class SyncMerger(
                     .awaitAsOneOrNull()
 
                 val localLastReadMillis = localHistory?.last_read?.time ?: 0L
-                if (remoteHistory.lastRead > localLastReadMillis) {
-                    database.historyQueries.upsert(
+                val currentDuration = localHistory?.time_read ?: 0L
+                val targetDuration = maxOf(remoteHistory.timeRead, currentDuration)
+                val deltaDuration = targetDuration - currentDuration
+                if (deltaDuration > 0 || remoteHistory.lastRead > localLastReadMillis) {
+                    database.syncQueries.upsertSyncHistory(
                         chapterId = localChapter._id,
-                        readAt = Date(remoteHistory.lastRead),
-                        time_read = remoteHistory.timeRead,
+                        readAt = Date(maxOf(remoteHistory.lastRead, localLastReadMillis)),
+                        time_read = deltaDuration,
                     )
                 }
             }

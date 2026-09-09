@@ -4,20 +4,15 @@ This document provides system architecture, design rules, and operational contex
 
 ---
 
-## 1. Prime Directive: Minimal Rebase Architecture
-
-This repository is an active fork of upstream Mihon (`mihonapp/mihon`). Upstream Mihon frequently refactors its domain interactors and presentation layers.
-To ensure this fork can rebase cleanly onto upstream releases with zero or minimal conflicts, adhere strictly to the following rules:
-
-### Rules:
-1. **DO NOT modify domain interactors:** Never inject sync callbacks or hooks directly into `tachiyomi/domain/*/interactor/*.kt` (e.g. `UpdateChapter`, `UpdateManga`, `UpsertHistory`).
-2. **Keep sync code isolated:** All core synchronization logic, cryptographic utilities, networking clients, and serializers must live strictly inside `eu.kanade.tachiyomi.sync.*`.
-3. **Use database diffing instead of event-sourcing:** When a sync event is triggered, query the existing SQLDelight database directly for rows modified after the last recorded sync watermark (`lastSyncTimestamp`).
-4. **Target high-level lifecycle events:** Restrict activity-level modifications to simple one-liner calls to `SyncManager.triggerSync()` (e.g. in `onPause`).
+> [!IMPORTANT]
+> **Architecture Decision Records (ADRs)**
+> All major architectural decisions, trade-offs, and design rationales are formally recorded under [`docs/adr/`](docs/adr/).
+> - Before making architectural or sync design modifications, agents **MUST** read the records in [`docs/adr/`](docs/adr/) (especially [ADR 0001](docs/adr/0001-sync-architecture-and-conflict-resolution.md)).
+> - Whenever changing architectural design or introducing new conflict resolution patterns, agents **MUST** update the existing ADRs or write a new ADR in [`docs/adr/`](docs/adr/).
 
 ---
 
-## 2. Codebase Organization
+## 1. Codebase Organization
 
 ```
 mihon-sync/
@@ -50,7 +45,7 @@ mihon-sync/
 
 ---
 
-## 3. Database Timestamp Nuance (Critical)
+## 2. Database Timestamp Nuance (Critical)
 
 Pay close attention to timestamp resolution differences in SQLite:
 - **`chapters.last_modified_at` and `mangas.last_modified_at`** are populated by SQLite triggers using `strftime('%s', 'now')` — they are stored in **SECONDS** since epoch.
@@ -66,34 +61,54 @@ Any future queries must respect this second vs. millisecond distinction.
 
 ---
 
-## 4. Conflict Resolution Strategy
+## 3. Conflict Resolution & Change Tracking Strategy (ADR 0001)
 
-`SyncMerger.kt` executes incoming remote payloads using two complementary strategies:
-1. **Monotonic Forward Reading Progress:**
-   - Reading progress (`last_page_read`) and read status (`read`) only advance forward. A device that is behind never overwrites higher progress on another device.
-2. **Last-Write-Wins (LWW):**
-   - Manga favorite status, categories, and bookmarks compare local `last_modified_at` vs. remote update timestamps. The newer record wins.
-3. **Loop Suppression:**
-   - Database writes during sync operations set `is_syncing = 1` to prevent local SQLite update triggers from bumping `version` or re-tagging rows as locally modified.
-
----
-
-## 5. Lifecycle Triggers & Debouncing
-
-Synchronization is triggered on three events:
-1. **Leaving Reader:** `ReaderActivity.onPause()`
-2. **Leaving App:** `MainActivity.onPause()`
-3. **Chapter Transition in Reader:** `ReaderActivity.kt` observing `viewModel.state.map { it.viewerChapters?.currChapter?.chapter?.id }`
-
-All triggers invoke:
-```kotlin
-syncManager.triggerSync(debounceDelayMs = 1000L)
-```
-`SyncManager` debounces triggers by 1 second using Kotlin Coroutines, coalescing rapid events into a single background push/pull cycle.
+`SyncMerger.kt` and SQLite triggers execute synchronization according to [ADR 0001](docs/adr/0001-sync-architecture-and-conflict-resolution.md):
+1. **Outbox Dirty Tracking (`is_dirty`):**
+   - Local database mutations set `is_dirty = 1` via SQLite update triggers whenever `new.is_syncing = 0 AND old.is_syncing = 0`.
+   - Incoming remote updates merged during sync set `is_syncing = 1`, bypassing dirty flags.
+   - Sync pushes only dirty rows and clears `is_dirty = 0` upon success. This decouples push extraction from remote timestamps, eliminating clock-skew bugs and preventing offline changes from being skipped.
+2. **Last-Write-Wins (LWW) with Guaranteed Parity:**
+   - Because the client automatically pulls on warm resume (`MainActivity.onResume()`), devices maintain library parity before reading.
+   - Chapter reading progress (`last_page_read`), read status (`read`), bookmarks, and manga favorite status compare versions and modification timestamps. If the remote record is strictly newer, it wins (allowing users to unmark read and re-read).
+   - History reading durations take `maxOf(remote, local)` by computing the delta `targetDuration - currentDuration` before calling SQLite `upsert`.
+3. **Full Category Reconciliation:**
+   - Category names, order (`sort`), and flags are updated to match remote state.
+   - Manga-category memberships synchronize bidirectionally (reflecting additions and removals).
+4. **Loop Suppression:**
+   - Database writes during sync operations set `is_syncing = 1`.
+   - SQLite update triggers require `WHEN new.is_syncing = 0 AND old.is_syncing = 0` to prevent sync merges from re-tagging rows as locally modified.
 
 ---
 
-## 6. Pairing URI Specification
+## 4. Lifecycle Triggers & Git-Style Synchronization
+
+Synchronization follows a streamlined Git-style workflow:
+1. **Warm Resume / App Launch (`git pull`)**: `MainActivity.onResume()` invokes:
+   ```kotlin
+   syncManager.triggerPull(skipIfRecentMs = 3000L)
+   ```
+   Pulls latest remote updates into SQLite so exact reading progress and active chapter are applied before entering the reader or library. If pending unpushed offline changes exist, they are queued for push.
+2. **Leaving Reader (`git push`)**: `ReaderActivity.onPause()` flushes history and immediately invokes:
+   ```kotlin
+   syncManager.triggerPush(debounceDelayMs = 0L)
+   ```
+3. **Minimizing / Leaving App (`git push`)**: `MainActivity.onPause()` immediately invokes:
+   ```kotlin
+   syncManager.triggerPush(debounceDelayMs = 0L)
+   ```
+   Using `0ms` delay guarantees that changes are dispatched before Android can terminate the process if swiped away from Recents.
+
+### Watermarks & Decoupling
+- **Outbox-driven Push**: `pushToOrigin()` executes `internalPull()` first to reconcile remote state, then extracts and pushes all local dirty modifications (`is_dirty = 1`). Successfully pushed rows have their dirty flags reset.
+- **Decoupled Watermarks**:
+  - `lastPullTimestamp`: Tracks remote server stream position for `GET /api/sync?since=...`.
+  - `lastSyncTimestamp`: Reflects the latest timestamp for UI display.
+- **Battery & Data Friendly**: No network calls occur mid-reading (e.g. during chapter transitions); sync only occurs on exit/pause and initial app start / return from background.
+
+---
+
+## 5. Pairing URI Specification
 
 The pairing URI encodes credentials for sharing between devices:
 ```

@@ -17,6 +17,7 @@ CREATE TABLE chapters(
     last_modified_at INTEGER NOT NULL DEFAULT 0,
     version INTEGER NOT NULL DEFAULT 0,
     is_syncing INTEGER NOT NULL DEFAULT 0,
+    is_dirty INTEGER NOT NULL DEFAULT 0,
     memo BLOB AS JsonObject NOT NULL DEFAULT '{}',
     FOREIGN KEY(manga_id) REFERENCES mangas (_id)
     ON DELETE CASCADE
@@ -29,9 +30,10 @@ CREATE INDEX idx_chapters_url ON chapters(url);
 CREATE TRIGGER update_last_modified_at_chapters
 AFTER UPDATE ON chapters
 FOR EACH ROW
+WHEN new.is_syncing = 0 AND old.is_syncing = 0
 BEGIN
   UPDATE chapters
-  SET last_modified_at = strftime('%s', 'now')
+  SET last_modified_at = strftime('%s', 'now'), is_dirty = 1
   WHERE _id = new._id;
 END;
 

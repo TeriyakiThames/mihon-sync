@@ -34,6 +34,8 @@ class SyncManagerTest {
     private val roomIdPref = mockk<Preference<String>>()
     private val encryptionKeyPref = mockk<Preference<String>>()
     private val lastSyncTimestampPref = mockk<Preference<Long>>()
+    private val lastPullTimestampPref = mockk<Preference<Long>>()
+    private val lastPushTimestampPref = mockk<Preference<Long>>()
     private val deviceIdPref = mockk<Preference<String>>()
 
     @BeforeEach
@@ -48,6 +50,8 @@ class SyncManagerTest {
         every { syncPreferences.roomId } returns roomIdPref
         every { syncPreferences.encryptionKey } returns encryptionKeyPref
         every { syncPreferences.lastSyncTimestamp } returns lastSyncTimestampPref
+        every { syncPreferences.lastPullTimestamp } returns lastPullTimestampPref
+        every { syncPreferences.lastPushTimestamp } returns lastPushTimestampPref
         every { syncPreferences.deviceId } returns deviceIdPref
 
         every { isSyncEnabledPref.get() } returns true
@@ -57,74 +61,102 @@ class SyncManagerTest {
         every { encryptionKeyPref.get() } returns validKey
         every { lastSyncTimestampPref.get() } returns 0L
         every { lastSyncTimestampPref.set(any()) } returns Unit
+        every { lastPullTimestampPref.get() } returns 0L
+        every { lastPullTimestampPref.set(any()) } returns Unit
+        every { lastPushTimestampPref.get() } returns 0L
+        every { lastPushTimestampPref.set(any()) } returns Unit
         every { deviceIdPref.get() } returns "device1"
         every { syncPreferences.isConfigured() } returns true
 
         coEvery { apiClient.pullUpdates(any()) } returns SyncUpdatesResponse(updates = emptyList())
         coEvery { apiClient.pushUpdate(any(), any()) } returns SyncUpdateResponse(success = true, timestamp = 1000L)
         coEvery { diffEngine.extractDiff(any()) } returns SyncPayload()
+        coEvery { diffEngine.clearLastExtractedDirty() } returns Unit
         coEvery { merger.merge(any()) } returns Unit
 
         syncManager = SyncManager(syncPreferences, diffEngine, merger, apiClient)
     }
 
     @Test
-    fun `AUTO_SYNC_COOLDOWN_MS is exactly 60000ms`() {
-        assertEquals(60_000L, SyncManager.AUTO_SYNC_COOLDOWN_MS)
+    fun `pullFromOrigin pulls updates and advances lastPullTimestamp without advancing lastPushTimestamp`() = runBlocking {
+        coEvery { apiClient.pullUpdates(sinceTimestamp = 0L) } returns SyncUpdatesResponse(
+            updates = listOf(
+                eu.kanade.tachiyomi.sync.data.SyncUpdateRecord(
+                    id = "up-1",
+                    timestamp = 5000L,
+                    deviceId = "device2",
+                    payload = eu.kanade.tachiyomi.sync.crypto.CryptoUtil.encryptString("{}", encryptionKeyPref.get()),
+                ),
+            ),
+        )
+
+        val success = syncManager.pullFromOrigin()
+
+        assertTrue(success)
+        coVerify(exactly = 1) { apiClient.pullUpdates(sinceTimestamp = 0L) }
+        coVerify(exactly = 1) { lastPullTimestampPref.set(5000L) }
+        coVerify(exactly = 0) { lastPushTimestampPref.set(any()) }
     }
 
     @Test
-    fun `rapid consecutive invocations to triggerSync within 60 seconds do not trigger multiple network syncs`() = runBlocking {
-        // First trigger
-        syncManager.triggerSync(debounceDelayMs = 10L)
-        delay(100L)
+    fun `pushToOrigin rebases first then extracts diff and advances lastPushTimestamp`() = runBlocking {
+        every { lastPushTimestampPref.get() } returns 2000L
+        coEvery { diffEngine.extractDiff(sinceTimestampMillis = 2000L) } returns SyncPayload(
+            chapters = listOf(
+                eu.kanade.tachiyomi.sync.data.ChapterSyncRecord(
+                    mangaSource = 1L,
+                    mangaUrl = "/manga1",
+                    chapterUrl = "/ch1",
+                    chapterName = "Ch. 1",
+                    read = true,
+                    bookmark = false,
+                    lastPageRead = 10L,
+                    chapterNumber = 1.0,
+                    scanlator = null,
+                    lastModifiedAt = 3L,
+                    version = 1L,
+                ),
+            ),
+        )
+        coEvery { apiClient.pushUpdate(any(), any()) } returns SyncUpdateResponse(success = true, timestamp = 6000L)
 
-        coVerify(exactly = 1) { apiClient.pullUpdates(any()) }
-
-        // Second trigger immediately within cooldown window
-        syncManager.triggerSync(debounceDelayMs = 10L)
-        delay(100L)
-
-        // Still exactly 1 network pull should have occurred
-        coVerify(exactly = 1) { apiClient.pullUpdates(any()) }
-
-        // Third trigger within cooldown window
-        syncManager.triggerSync(debounceDelayMs = 0L)
-        delay(100L)
-
-        coVerify(exactly = 1) { apiClient.pullUpdates(any()) }
-    }
-
-    @Test
-    fun `manual sync calls with force = true bypass the 60-second cooldown`() = runBlocking {
-        // Set cooldown as actively triggered just now
-        syncManager.lastAutoSyncTimestamp = System.currentTimeMillis()
-
-        // Manual sync with force = true should execute immediately despite active cooldown
-        val success = syncManager.syncNow(force = true)
+        val success = syncManager.pushToOrigin()
 
         assertTrue(success)
         coVerify(exactly = 1) { apiClient.pullUpdates(any()) }
+        coVerify(exactly = 1) { diffEngine.extractDiff(sinceTimestampMillis = 2000L) }
+        coVerify(exactly = 1) { apiClient.pushUpdate(any(), any()) }
+        coVerify(exactly = 1) { diffEngine.clearLastExtractedDirty() }
+        coVerify(exactly = 1) { lastPushTimestampPref.set(6000L) }
     }
 
     @Test
-    fun `syncNow with force = false respects the 60-second cooldown`() = runBlocking {
-        // Set cooldown as actively triggered just now
-        syncManager.lastAutoSyncTimestamp = System.currentTimeMillis()
+    fun `triggerPull skips if sync completed within skipIfRecentMs`() = runBlocking {
+        syncManager.lastSyncCompletedTimestamp = System.currentTimeMillis()
 
-        // syncNow with force = false should be rejected due to active cooldown
-        val result = syncManager.syncNow(force = false)
+        syncManager.triggerPull(skipIfRecentMs = 3000L)
+        delay(100L)
 
-        assertFalse(result)
         coVerify(exactly = 0) { apiClient.pullUpdates(any()) }
     }
 
     @Test
-    fun `triggerSync succeeds after 60-second cooldown expires`() = runBlocking {
-        // Simulate a sync that occurred 61 seconds ago
-        syncManager.lastAutoSyncTimestamp = System.currentTimeMillis() - 61_000L
+    fun `triggerInitialPull executes sync on first call and skips on subsequent calls`() = runBlocking {
+        syncManager.triggerInitialPull()
+        delay(100L)
 
-        syncManager.triggerSync(debounceDelayMs = 10L)
+        coVerify(exactly = 1) { apiClient.pullUpdates(any()) }
+
+        // Second call should be a no-op
+        syncManager.triggerInitialPull()
+        delay(100L)
+
+        coVerify(exactly = 1) { apiClient.pullUpdates(any()) }
+    }
+
+    @Test
+    fun `triggerPush with 0ms delay executes immediately`() = runBlocking {
+        syncManager.triggerPush(debounceDelayMs = 0L)
         delay(100L)
 
         coVerify(exactly = 1) { apiClient.pullUpdates(any()) }

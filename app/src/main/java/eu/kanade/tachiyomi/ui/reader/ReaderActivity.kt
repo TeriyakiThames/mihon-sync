@@ -348,7 +348,7 @@ class ReaderActivity : BaseActivity() {
     override fun onPause() {
         lifecycleScope.launchNonCancellable {
             viewModel.updateHistory()
-            graph.syncManager.triggerSync()
+            graph.syncManager.triggerPush(debounceDelayMs = 0L)
         }
         super.onPause()
     }

@@ -62,6 +62,7 @@ val backupChapterMapper = {
         lastModifiedAt: Long,
         version: Long,
         _: Long,
+        _: Long,
         memo: JsonObject,
     ->
     BackupChapter(
