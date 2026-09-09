@@ -2,6 +2,10 @@
 .gradle
 .kotlin
 build
+*.apk
+*.aab
+app/release/
+app/debug/
 
 # IDE files
 *.iml
