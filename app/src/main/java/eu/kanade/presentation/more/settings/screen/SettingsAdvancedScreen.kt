@@ -6,6 +6,8 @@ import android.content.Intent
 import android.provider.Settings
 import android.webkit.WebStorage
 import android.webkit.WebView
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -26,7 +28,7 @@ import eu.kanade.domain.base.BasePreferences
 import eu.kanade.presentation.more.settings.Preference
 import eu.kanade.presentation.more.settings.screen.advanced.ClearDatabaseScreen
 import eu.kanade.presentation.more.settings.screen.debug.DebugInfoScreen
-import eu.kanade.tachiyomi.data.library.MetadataUpdateJob
+import eu.kanade.tachiyomi.data.library.MetadataUpdateWorker
 import eu.kanade.tachiyomi.network.NetworkPreferences
 import eu.kanade.tachiyomi.network.PREF_DOH_360
 import eu.kanade.tachiyomi.network.PREF_DOH_ADGUARD
@@ -41,18 +43,20 @@ import eu.kanade.tachiyomi.network.PREF_DOH_QUAD101
 import eu.kanade.tachiyomi.network.PREF_DOH_QUAD9
 import eu.kanade.tachiyomi.network.PREF_DOH_SHECAN
 import eu.kanade.tachiyomi.ui.more.OnboardingScreen
+import eu.kanade.tachiyomi.util.system.GLUtil
 import eu.kanade.tachiyomi.util.system.isReleaseBuildType
 import eu.kanade.tachiyomi.util.system.isShizukuInstalled
 import eu.kanade.tachiyomi.util.system.powerManager
 import eu.kanade.tachiyomi.util.system.setDefaultSettings
 import eu.kanade.tachiyomi.util.system.toast
 import eu.kanade.tachiyomi.util.system.workManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import logcat.LogPriority
 import mihon.app.di.appGraph
 import okhttp3.Headers
-import tachiyomi.core.common.util.lang.launchNonCancellable
-import tachiyomi.core.common.util.lang.withUIContext
+import tachiyomi.core.common.util.system.ImageUtil
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.library.service.LibraryPreferences
 import tachiyomi.i18n.MR
@@ -193,6 +197,7 @@ object SettingsAdvancedScreen : SearchableSettings {
     ): Preference.PreferenceGroup {
         val context = LocalContext.current
         val networkHelper = remember { context.appGraph.networkHelper }
+        val scope = rememberCoroutineScope()
 
         val userAgentPref = networkPreferences.defaultUserAgent
         val userAgent by userAgentPref.collectAsState()
@@ -219,8 +224,10 @@ object SettingsAdvancedScreen : SearchableSettings {
                                 clearSslPreferences()
                             }
                             WebStorage.getInstance().deleteAllData()
-                            context.applicationInfo?.dataDir?.let { File("$it/app_webview/").deleteRecursively() }
-                            context.toast(MR.strings.webview_data_deleted)
+                            scope.launch(Dispatchers.IO) {
+                                context.applicationInfo?.dataDir?.let { File("$it/app_webview/").deleteRecursively() }
+                                withContext(Dispatchers.Main) { context.toast(MR.strings.webview_data_deleted) }
+                            }
                         } catch (e: Throwable) {
                             logcat(LogPriority.ERROR, e)
                             context.toast(MR.strings.cache_delete_error)
@@ -267,7 +274,7 @@ object SettingsAdvancedScreen : SearchableSettings {
                 ),
                 Preference.PreferenceItem.TextPreference(
                     title = stringResource(MR.strings.pref_reset_user_agent_string),
-                    enabled = remember(userAgent) { userAgent != userAgentPref.defaultValue() },
+                    visible = remember(userAgent) { userAgent != userAgentPref.defaultValue() },
                     onClick = {
                         userAgentPref.delete()
                         context.toast(MR.strings.requires_app_restart)
@@ -289,22 +296,20 @@ object SettingsAdvancedScreen : SearchableSettings {
             preferenceItems = listOf(
                 Preference.PreferenceItem.TextPreference(
                     title = stringResource(MR.strings.pref_refresh_library_covers),
-                    onClick = { MetadataUpdateJob.startNow(context.workManager) },
+                    onClick = { scope.launch { MetadataUpdateWorker.startNow(context.workManager) } },
                 ),
                 Preference.PreferenceItem.TextPreference(
                     title = stringResource(MR.strings.pref_reset_viewer_flags),
                     subtitle = stringResource(MR.strings.pref_reset_viewer_flags_summary),
                     onClick = {
-                        scope.launchNonCancellable {
+                        scope.launch {
                             val success = context.appGraph.resetViewerFlags.await()
-                            withUIContext {
-                                val message = if (success) {
-                                    MR.strings.pref_reset_viewer_flags_success
-                                } else {
-                                    MR.strings.pref_reset_viewer_flags_error
-                                }
-                                context.toast(message)
+                            val message = if (success) {
+                                MR.strings.pref_reset_viewer_flags_success
+                            } else {
+                                MR.strings.pref_reset_viewer_flags_error
                             }
+                            context.toast(message)
                         }
                     },
                 ),
@@ -318,6 +323,11 @@ object SettingsAdvancedScreen : SearchableSettings {
                     title = stringResource(MR.strings.pref_disallow_non_ascii_filenames),
                     subtitle = stringResource(MR.strings.pref_disallow_non_ascii_filenames_details),
                 ),
+                Preference.PreferenceItem.SwitchPreference(
+                    preference = libraryPreferences.enableChapterNameHash,
+                    title = stringResource(MR.strings.pref_enable_chapter_name_hash),
+                    subtitle = stringResource(MR.strings.pref_enable_chapter_name_hash_details),
+                ),
             ),
         )
     }
@@ -327,12 +337,43 @@ object SettingsAdvancedScreen : SearchableSettings {
         basePreferences: BasePreferences,
     ): Preference.PreferenceGroup {
         val context = LocalContext.current
+        val chooseColorProfile = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.OpenDocument(),
+        ) { uri ->
+            uri?.let {
+                val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+                context.contentResolver.takePersistableUriPermission(uri, flags)
+                basePreferences.displayProfile.set(uri.toString())
+            }
+        }
         return Preference.PreferenceGroup(
             title = stringResource(MR.strings.pref_category_reader),
             preferenceItems = listOf(
-                Preference.PreferenceItem.SwitchPreference(
-                    preference = basePreferences.highQualityRenderer,
-                    title = stringResource(MR.strings.pref_high_quality_renderer),
+                Preference.PreferenceItem.ListPreference(
+                    preference = basePreferences.hardwareBitmapThreshold,
+                    entries = GLUtil.CUSTOM_TEXTURE_LIMIT_OPTIONS
+                        .mapIndexed { index, option ->
+                            val display = if (index == 0) {
+                                stringResource(MR.strings.pref_hardware_bitmap_threshold_default, option)
+                            } else {
+                                option.toString()
+                            }
+                            option to display
+                        }
+                        .toMap(),
+                    title = stringResource(MR.strings.pref_hardware_bitmap_threshold),
+                    subtitleProvider = { value, options ->
+                        stringResource(MR.strings.pref_hardware_bitmap_threshold_summary, options[value].orEmpty())
+                    },
+                    visible = !ImageUtil.HARDWARE_BITMAP_UNSUPPORTED &&
+                        GLUtil.DEVICE_TEXTURE_LIMIT > GLUtil.SAFE_TEXTURE_LIMIT,
+                ),
+                Preference.PreferenceItem.TextPreference(
+                    title = stringResource(MR.strings.pref_display_profile),
+                    subtitle = basePreferences.displayProfile.get(),
+                    onClick = {
+                        chooseColorProfile.launch(arrayOf("*/*"))
+                    },
                 ),
             ),
         )
@@ -400,10 +441,7 @@ object SettingsAdvancedScreen : SearchableSettings {
                 ),
                 Preference.PreferenceItem.TextPreference(
                     title = stringResource(MR.strings.ext_revoke_trust),
-                    onClick = {
-                        trustExtension.revokeAll()
-                        context.toast(MR.strings.requires_app_restart)
-                    },
+                    onClick = { trustExtension.revokeAll() },
                 ),
             ),
         )

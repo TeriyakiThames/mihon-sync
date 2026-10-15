@@ -1,209 +1,245 @@
-import java.util.Date;
+import eu.kanade.tachiyomi.source.model.UpdateStrategy;
 import kotlin.Boolean;
+import kotlin.Int;
 import kotlin.String;
 import kotlin.collections.List;
+import kotlin.time.Instant;
+import kotlinx.serialization.json.JsonObject;
 
 -- Extract chapters modified since given epoch seconds, joined with parent manga identity
 getModifiedChapters:
 SELECT
-    C._id AS chapterId,
-    M.source AS mangaSource,
-    M.url AS mangaUrl,
-    C.url AS chapterUrl,
-    C.name AS chapterName,
-    C.read,
-    C.bookmark,
-    C.last_page_read AS lastPageRead,
-    C.chapter_number AS chapterNumber,
-    C.scanlator,
-    C.last_modified_at AS lastModifiedAt,
-    C.version
-FROM chapters C
-JOIN mangas M ON C.manga_id = M._id
-WHERE (:sinceSeconds = 0 AND (C.read = 1 OR C.last_page_read > 0 OR C.bookmark = 1))
+    C.id AS chapterId,
+    M.source_id AS mangaSource,
+    M.remote_url AS mangaUrl,
+    C.remote_url AS chapterUrl,
+    C.remote_name AS chapterName,
+    C.user_read AS read,
+    C.user_bookmark AS bookmark,
+    C.user_last_page_read AS lastPageRead,
+    C.remote_chapter_number AS chapterNumber,
+    C.remote_scanlator AS scanlator,
+    C.last_modified_at AS lastModifiedAt
+FROM chapter C
+JOIN manga M ON C.manga_id = M.id
+WHERE (:sinceSeconds = 0 AND (C.user_read = 1 OR C.user_last_page_read > 0 OR C.user_bookmark = 1))
    OR (:sinceSeconds > 0 AND (C.is_dirty = 1 OR C.last_modified_at >= :sinceSeconds));
 
 -- Extract history records modified since given Date/millis, joined with manga & chapter identity
 getModifiedHistory:
 SELECT
-    H._id AS historyId,
-    M.source AS mangaSource,
-    M.url AS mangaUrl,
-    C.url AS chapterUrl,
-    H.last_read AS lastRead,
-    H.time_read AS timeRead
+    H.id AS historyId,
+    M.source_id AS mangaSource,
+    M.remote_url AS mangaUrl,
+    C.remote_url AS chapterUrl,
+    H.read_at AS readAt,
+    H.read_duration AS timeRead
 FROM history H
-JOIN chapters C ON H.chapter_id = C._id
-JOIN mangas M ON C.manga_id = M._id
-WHERE (:sinceMillis = 0 AND H.last_read > 0)
-   OR (:sinceMillis > 0 AND (H.is_dirty = 1 OR H.last_read > :sinceMillis));
+JOIN chapter C ON H.chapter_id = C.id
+JOIN manga M ON C.manga_id = M.id
+WHERE (:sinceInstant IS NULL AND H.read_at IS NOT NULL)
+   OR (:sinceInstant IS NOT NULL AND (H.is_dirty = 1 OR (H.read_at IS NOT NULL AND H.read_at > :sinceInstant)));
 
 -- Extract favorite mangas modified since given epoch seconds
 getModifiedMangas:
 SELECT
-    M._id AS mangaId,
-    M.source,
-    M.url,
-    M.title,
-    M.artist,
-    M.author,
-    M.description,
-    M.genre,
-    M.status,
-    M.thumbnail_url AS thumbnailUrl,
-    M.favorite,
-    M.chapter_flags AS chapterFlags,
-    M.viewer AS viewerFlags,
-    M.date_added AS dateAdded,
+    M.id AS mangaId,
+    M.source_id AS source,
+    M.remote_url AS url,
+    M.remote_title AS title,
+    M.remote_artist AS artist,
+    M.remote_author AS author,
+    M.remote_description AS description,
+    M.remote_genre AS genre,
+    M.remote_status AS status,
+    M.remote_cover AS thumbnailUrl,
+    M.user_favorite_at IS NOT NULL AS favorite,
+    M.user_chapter_flags AS chapterFlags,
+    M.user_reader_flags AS viewerFlags,
+    M.user_favorite_at AS favoriteAt,
     M.last_modified_at AS lastModifiedAt,
-    M.favorite_modified_at AS favoriteModifiedAt,
-    M.version
-FROM mangas M
-WHERE (:sinceSeconds = 0 AND M.favorite = 1)
+    M.favorite_modified_at AS favoriteModifiedAt
+FROM manga M
+WHERE (:sinceSeconds = 0 AND M.user_favorite_at IS NOT NULL)
    OR (:sinceSeconds > 0 AND (M.is_dirty = 1 OR M.last_modified_at >= :sinceSeconds OR (M.favorite_modified_at IS NOT NULL AND M.favorite_modified_at >= :sinceSeconds)));
 
 -- Extract categories associated with a manga
 getCategoriesForManga:
 SELECT
     C.name,
-    C.sort AS `order`,
+    C.`order` AS `order`,
     C.flags
-FROM categories C
-JOIN mangas_categories MC ON C._id = MC.category_id
+FROM category C
+JOIN manga_category MC ON C.id = MC.category_id
 WHERE MC.manga_id = :mangaId;
 
 -- Helper to find local manga by natural key
 getMangaBySourceAndUrl:
 SELECT *
-FROM mangas
-WHERE source = :source AND url = :url
+FROM manga
+WHERE source_id = :source AND remote_url = :url
 LIMIT 1;
 
 -- Helper to find local chapter by parent manga ID and chapter URL
 getChapterByMangaIdAndUrl:
 SELECT *
-FROM chapters
-WHERE manga_id = :mangaId AND url = :chapterUrl
+FROM chapter
+WHERE manga_id = :mangaId AND remote_url = :chapterUrl
+LIMIT 1;
+
+-- Helper to find history by chapter ID
+getHistoryByChapterId:
+SELECT id, chapter_id, read_at, read_duration
+FROM history
+WHERE chapter_id = :chapterId
 LIMIT 1;
 
 -- Helper to find category by name
 getCategoryByName:
 SELECT *
-FROM categories
+FROM category
 WHERE name = :name
 LIMIT 1;
 
 -- Extract all user categories
 getAllCategories:
 SELECT
-    _id AS id,
+    id,
     name,
-    sort AS `order`,
+    `order` AS `order`,
     flags
-FROM categories
-WHERE _id > 0;
+FROM category
+WHERE id > 0;
 
 -- Helper to insert category
 insertCategory:
-INSERT INTO categories(name, sort, flags)
+INSERT INTO category(name, `order`, flags)
 VALUES (:name, :order, :flags)
-RETURNING _id;
+RETURNING id;
 
 -- Helper to update category order and flags
 updateCategory:
-UPDATE categories
-SET sort = :order, flags = :flags
-WHERE _id = :id;
+UPDATE category
+SET `order` = :order, flags = :flags
+WHERE id = :id;
 
 -- Helper to associate manga with category
 insertMangaCategory:
-INSERT OR IGNORE INTO mangas_categories(manga_id, category_id)
+INSERT OR IGNORE INTO manga_category(manga_id, category_id)
 VALUES (:mangaId, :categoryId);
 
 -- Helper to remove all category associations for a manga
 deleteMangaCategoriesForManga:
-DELETE FROM mangas_categories
+DELETE FROM manga_category
 WHERE manga_id = :mangaId;
 
 -- Upsert a remote reading history record with is_dirty = 0
 upsertSyncHistory:
-INSERT INTO history(chapter_id, last_read, time_read, is_dirty)
-VALUES (:chapterId, :readAt, :time_read, 0)
+INSERT INTO history(manga_id, chapter_id, read_at, read_duration, is_dirty)
+VALUES (:mangaId, :chapterId, :readAt, :timeRead, 0)
 ON CONFLICT(chapter_id)
 DO UPDATE
 SET
-    last_read = :readAt,
-    time_read = time_read + :time_read,
+    read_at = :readAt,
+    read_duration = read_duration + :timeRead,
     is_dirty = 0
 WHERE chapter_id = :chapterId;
 
 -- Insert a remote manga with is_syncing = 1 and is_dirty = 0
 insertSyncManga:
-INSERT INTO mangas(
-    source, url, artist, author, description, genre, title, status, thumbnail_url, favorite,
-    last_update, next_update, initialized, viewer, chapter_flags, cover_last_modified, date_added,
-    update_strategy, calculate_interval, last_modified_at, favorite_modified_at, version, is_syncing, is_dirty
+INSERT INTO manga(
+    source_id, remote_url, remote_title, remote_author, remote_artist, remote_description,
+    remote_genre, remote_status, remote_cover, remote_update_strategy, remote_memo,
+    user_favorite_at, user_notes, user_reader_flags, user_chapter_flags,
+    state_chapter_last_update, state_chapter_next_update, state_chapter_fetch_interval,
+    state_cover_last_modified, state_initialized,
+    is_syncing, is_dirty, last_modified_at, favorite_modified_at
 )
 VALUES (
-    :source, :url, :artist, :author, :description, :genre, :title, :status, :thumbnailUrl, :favorite,
-    0, 0, 0, :viewerFlags, :chapterFlags, 0, :dateAdded,
-    0, 0, :lastModifiedAt, :favoriteModifiedAt, :version, 1, 0
+    :source, :url, :title, :author, :artist, :description,
+    :genre, :status, :thumbnailUrl, :updateStrategy, :memo,
+    :userFavoriteAt, '', :viewerFlags, :chapterFlags,
+    NULL, NULL, 0,
+    NULL, 0,
+    1, 0, :lastModifiedAt, :favoriteModifiedAt
 )
-RETURNING _id;
+RETURNING id;
+
+-- Update remote manga favorite status with is_syncing = 1 and is_dirty = 0
+updateSyncMangaFavorite:
+UPDATE manga
+SET user_favorite_at = :userFavoriteAt,
+    favorite_modified_at = :favoriteModifiedAt,
+    last_modified_at = :lastModifiedAt,
+    is_syncing = 1,
+    is_dirty = 0
+WHERE id = :id;
 
 -- Insert a remote chapter with is_syncing = 1 and is_dirty = 0
 insertSyncChapter:
-INSERT INTO chapters(
-    manga_id, url, name, scanlator, read, bookmark, last_page_read,
-    chapter_number, source_order, date_fetch, date_upload,
-    last_modified_at, version, is_syncing, is_dirty
+INSERT INTO chapter(
+    manga_id, remote_url, remote_name, remote_scanlator, remote_chapter_number,
+    remote_date_upload, remote_order, remote_memo,
+    user_read, user_bookmark, user_last_page_read, state_date_fetch,
+    is_syncing, is_dirty, last_modified_at
 )
 VALUES (
-    :mangaId, :url, :name, :scanlator, :read, :bookmark, :lastPageRead,
-    :chapterNumber, 0, 0, 0,
-    :lastModifiedAt, :version, 1, 0
+    :mangaId, :url, :name, :scanlator, :chapterNumber,
+    NULL, 0, :memo,
+    :read, :bookmark, :lastPageRead, :stateDateFetch,
+    1, 0, :lastModifiedAt
 )
-RETURNING _id;
+RETURNING id;
+
+-- Update remote chapter reading state with is_syncing = 1 and is_dirty = 0
+updateSyncChapter:
+UPDATE chapter
+SET user_read = :read,
+    user_bookmark = :bookmark,
+    user_last_page_read = :lastPageRead,
+    last_modified_at = :lastModifiedAt,
+    is_syncing = 1,
+    is_dirty = 0
+WHERE id = :id;
 
 -- Set is_syncing flag on specific chapter
 setChapterIsSyncing:
-UPDATE chapters
+UPDATE chapter
 SET is_syncing = :isSyncing
-WHERE _id = :chapterId;
+WHERE id = :chapterId;
 
 -- Set is_syncing flag on specific manga
 setMangaIsSyncing:
-UPDATE mangas
+UPDATE manga
 SET is_syncing = :isSyncing
-WHERE _id = :mangaId;
+WHERE id = :mangaId;
 
 -- Reset is_syncing on all chapters
 resetAllChapterIsSyncing:
-UPDATE chapters
+UPDATE chapter
 SET is_syncing = 0
 WHERE is_syncing != 0;
 
 -- Reset is_syncing on all mangas
 resetAllMangaIsSyncing:
-UPDATE mangas
+UPDATE manga
 SET is_syncing = 0
 WHERE is_syncing != 0;
 
 -- Clear dirty flags on specific chapters
 clearDirtyChaptersByIds:
-UPDATE chapters
+UPDATE chapter
 SET is_dirty = 0
-WHERE _id IN :chapterIds;
+WHERE id IN :chapterIds;
 
 -- Clear dirty flags on specific mangas
 clearDirtyMangasByIds:
-UPDATE mangas
+UPDATE manga
 SET is_dirty = 0
-WHERE _id IN :mangaIds;
+WHERE id IN :mangaIds;
 
 -- Clear dirty flags on specific history records
 clearDirtyHistoryByIds:
 UPDATE history
 SET is_dirty = 0
-WHERE _id IN :historyIds;
-
+WHERE id IN :historyIds;
