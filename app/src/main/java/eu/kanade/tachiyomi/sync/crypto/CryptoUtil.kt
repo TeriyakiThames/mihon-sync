@@ -136,7 +136,8 @@ object CryptoUtil {
         }
         val minExpectedLength = IV_SIZE_BYTES + (TAG_BIT_LENGTH / 8)
         require(combinedBytes.size >= minExpectedLength) {
-            "Ciphertext too short (${combinedBytes.size} bytes); expected at least $minExpectedLength bytes for IV and tag"
+            "Ciphertext too short (${combinedBytes.size} bytes); " +
+                "expected at least $minExpectedLength bytes for IV and tag"
         }
 
         val iv = ByteArray(IV_SIZE_BYTES)

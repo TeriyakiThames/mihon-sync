@@ -1,8 +1,12 @@
 package eu.kanade.tachiyomi.sync
 
+import eu.kanade.tachiyomi.sync.crypto.CryptoUtil
+import eu.kanade.tachiyomi.sync.data.ChapterSyncRecord
 import eu.kanade.tachiyomi.sync.data.SyncDiffEngine
 import eu.kanade.tachiyomi.sync.data.SyncMerger
 import eu.kanade.tachiyomi.sync.data.SyncPayload
+import eu.kanade.tachiyomi.sync.data.SyncSnapshotRecord
+import eu.kanade.tachiyomi.sync.data.SyncUpdateRecord
 import eu.kanade.tachiyomi.sync.data.SyncUpdateResponse
 import eu.kanade.tachiyomi.sync.data.SyncUpdatesResponse
 import eu.kanade.tachiyomi.sync.service.SyncApiClient
@@ -57,7 +61,7 @@ class SyncManagerTest {
         every { isSyncEnabledPref.get() } returns true
         every { serverUrlPref.get() } returns "https://sync.mihon.app"
         every { roomIdPref.get() } returns "room123"
-        val validKey = eu.kanade.tachiyomi.sync.crypto.CryptoUtil.generateSecretKey()
+        val validKey = CryptoUtil.generateSecretKey()
         every { encryptionKeyPref.get() } returns validKey
         every { lastSyncTimestampPref.get() } returns 0L
         every { lastSyncTimestampPref.set(any()) } returns Unit
@@ -78,32 +82,36 @@ class SyncManagerTest {
     }
 
     @Test
-    fun `pullFromOrigin pulls updates and advances lastPullTimestamp without advancing lastPushTimestamp`() = runBlocking {
-        coEvery { apiClient.pullUpdates(sinceTimestamp = 0L) } returns SyncUpdatesResponse(
-            updates = listOf(
-                eu.kanade.tachiyomi.sync.data.SyncUpdateRecord(
-                    id = "up-1",
-                    timestamp = 5000L,
-                    deviceId = "device2",
-                    payload = eu.kanade.tachiyomi.sync.crypto.CryptoUtil.encryptString("{}", encryptionKeyPref.get()),
+    fun `pullFromOrigin pulls updates and advances lastPullTimestamp without advancing lastPushTimestamp`() =
+        runBlocking {
+            coEvery { apiClient.pullUpdates(sinceTimestamp = 0L) } returns SyncUpdatesResponse(
+                updates = listOf(
+                    SyncUpdateRecord(
+                        id = "up-1",
+                        timestamp = 5000L,
+                        deviceId = "device2",
+                        payload = CryptoUtil.encryptString(
+                            "{}",
+                            encryptionKeyPref.get(),
+                        ),
+                    ),
                 ),
-            ),
-        )
+            )
 
-        val success = syncManager.pullFromOrigin()
+            val success = syncManager.pullFromOrigin()
 
-        assertTrue(success)
-        coVerify(exactly = 1) { apiClient.pullUpdates(sinceTimestamp = 0L) }
-        coVerify(exactly = 1) { lastPullTimestampPref.set(5000L) }
-        coVerify(exactly = 0) { lastPushTimestampPref.set(any()) }
-    }
+            assertTrue(success)
+            coVerify(exactly = 1) { apiClient.pullUpdates(sinceTimestamp = 0L) }
+            coVerify(exactly = 1) { lastPullTimestampPref.set(5000L) }
+            coVerify(exactly = 0) { lastPushTimestampPref.set(any()) }
+        }
 
     @Test
     fun `pushToOrigin rebases first then extracts diff and advances lastPushTimestamp`() = runBlocking {
         every { lastPushTimestampPref.get() } returns 2000L
         coEvery { diffEngine.extractDiff(sinceTimestampMillis = 2000L) } returns SyncPayload(
             chapters = listOf(
-                eu.kanade.tachiyomi.sync.data.ChapterSyncRecord(
+                ChapterSyncRecord(
                     mangaSource = 1L,
                     mangaUrl = "/manga1",
                     chapterUrl = "/ch1",
@@ -165,10 +173,10 @@ class SyncManagerTest {
     @Test
     fun `merges snapshot first when pullResponse contains a snapshot`() = runBlocking {
         val key = encryptionKeyPref.get()
-        val encryptedSnapshot = eu.kanade.tachiyomi.sync.crypto.CryptoUtil.encryptString("{}", key)
+        val encryptedSnapshot = CryptoUtil.encryptString("{}", key)
 
         coEvery { apiClient.pullUpdates(any()) } returns SyncUpdatesResponse(
-            snapshot = eu.kanade.tachiyomi.sync.data.SyncSnapshotRecord(
+            snapshot = SyncSnapshotRecord(
                 id = "snap-1",
                 timestamp = 5000L,
                 payload = encryptedSnapshot,
@@ -237,7 +245,7 @@ class SyncManagerTest {
         coEvery { apiClient.pullUpdates(any()) } returns SyncUpdatesResponse(updates = emptyList())
         coEvery { diffEngine.extractDiff(any()) } returns SyncPayload(
             chapters = listOf(
-                eu.kanade.tachiyomi.sync.data.ChapterSyncRecord(
+                ChapterSyncRecord(
                     mangaSource = 1L,
                     mangaUrl = "/manga1",
                     chapterUrl = "/ch1",

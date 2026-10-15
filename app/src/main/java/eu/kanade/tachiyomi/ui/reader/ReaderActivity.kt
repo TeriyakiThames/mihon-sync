@@ -43,7 +43,9 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.lifecycleScope
+import com.davemorrissey.labs.subscaleview.SubsamplingScaleImageView
 import com.google.android.material.transition.platform.MaterialContainerTransform
+import com.hippo.unifile.UniFile
 import dev.zacsweers.metro.Inject
 import eu.kanade.domain.base.BasePreferences
 import eu.kanade.presentation.reader.DisplayRefreshHost
@@ -56,6 +58,7 @@ import eu.kanade.presentation.reader.appbars.ReaderAppBars
 import eu.kanade.presentation.reader.components.ChapterNavigatorType
 import eu.kanade.presentation.reader.settings.ReaderSettingsDialog
 import eu.kanade.tachiyomi.R
+import eu.kanade.tachiyomi.data.coil.ImageDecoder
 import eu.kanade.tachiyomi.data.notification.NotificationReceiver
 import eu.kanade.tachiyomi.data.notification.Notifications
 import eu.kanade.tachiyomi.databinding.ReaderActivityBinding
@@ -74,13 +77,13 @@ import eu.kanade.tachiyomi.ui.reader.setting.ReaderSettingsViewModel
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingMode
 import eu.kanade.tachiyomi.ui.reader.viewer.ReaderProgressIndicator
 import eu.kanade.tachiyomi.ui.reader.viewer.pager.R2LPagerViewer
-import eu.kanade.tachiyomi.ui.reader.viewer.webgpu.WebGpuViewer
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
 import eu.kanade.tachiyomi.util.system.openInBrowser
 import eu.kanade.tachiyomi.util.system.readerBackgroundColor
 import eu.kanade.tachiyomi.util.system.toShareIntent
 import eu.kanade.tachiyomi.util.system.toast
 import eu.kanade.tachiyomi.util.view.setComposeContent
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
@@ -95,11 +98,10 @@ import mihon.app.di.AppGraph
 import mihon.core.metro.metroGraph
 import tachiyomi.core.common.Constants
 import tachiyomi.core.common.i18n.stringResource
-import tachiyomi.core.common.util.lang.launchIO
-import tachiyomi.core.common.util.lang.launchNonCancellable
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.util.collectAsState
+import java.io.ByteArrayOutputStream
 import kotlin.time.Duration.Companion.seconds
 
 class ReaderActivity : BaseActivity() {
@@ -216,7 +218,6 @@ class ReaderActivity : BaseActivity() {
             .filterNotNull()
             .onEach(::setChapters)
             .launchIn(lifecycleScope)
-
 
         viewModel.eventFlow
             .onEach { event ->
@@ -346,10 +347,8 @@ class ReaderActivity : BaseActivity() {
     }
 
     override fun onPause() {
-        lifecycleScope.launchNonCancellable {
-            viewModel.updateHistory()
-            graph.syncManager.triggerPush(debounceDelayMs = 0L)
-        }
+        viewModel.saveHistory()
+        graph.syncManager.triggerPush(debounceDelayMs = 0L)
         super.onPause()
     }
 
@@ -478,7 +477,7 @@ class ReaderActivity : BaseActivity() {
             onShare = ::shareChapter.takeIf { isHttpSource },
 
             chapterNavigatorType = if (!verticalNavigator) {
-                if (state.viewer is R2LPagerViewer || (state.viewer as? WebGpuViewer)?.isReversed ?: false) {
+                if (state.viewer is R2LPagerViewer) {
                     ChapterNavigatorType.HORIZONTAL_RTL
                 } else {
                     ChapterNavigatorType.HORIZONTAL_LTR
@@ -623,7 +622,7 @@ class ReaderActivity : BaseActivity() {
         binding.readerContainer.removeView(loadingIndicator)
         viewModel.state.value.viewer?.setChapters(viewerChapters)
 
-        lifecycleScope.launchIO {
+        lifecycleScope.launch(Dispatchers.IO) {
             viewModel.getChapterUrl()?.let { url ->
                 assistUrl = url
             }
@@ -708,7 +707,7 @@ class ReaderActivity : BaseActivity() {
      * the viewer is reaching the beginning or end of a chapter or the transition page is active.
      */
     fun requestPreloadChapter(chapter: ReaderChapter) {
-        lifecycleScope.launchIO { viewModel.preload(chapter) }
+        lifecycleScope.launch(Dispatchers.IO) { viewModel.preload(chapter) }
     }
 
     /**
@@ -865,6 +864,10 @@ class ReaderActivity : BaseActivity() {
                 }
                 .launchIn(lifecycleScope)
 
+            preferences.displayProfile.changes()
+                .onEach { setDisplayProfile(it) }
+                .launchIn(lifecycleScope)
+
             readerPreferences.keepScreenOn.changes()
                 .onEach(::setKeepScreenOn)
                 .launchIn(lifecycleScope)
@@ -890,6 +893,25 @@ class ReaderActivity : BaseActivity() {
                     updateViewerInset(fullscreen, drawUnderCutout)
                 }
                 .launchIn(lifecycleScope)
+        }
+
+        /**
+         * Sets the display profile to [path].
+         */
+        private fun setDisplayProfile(path: String) {
+            val file = UniFile.fromUri(baseContext, path.toUri())
+            if (file != null && file.exists()) {
+                val inputStream = file.openInputStream()
+                val outputStream = ByteArrayOutputStream()
+                inputStream.use { input ->
+                    outputStream.use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                val data = outputStream.toByteArray()
+                SubsamplingScaleImageView.setDisplayProfile(data)
+                ImageDecoder.displayProfile = data
+            }
         }
 
         /**

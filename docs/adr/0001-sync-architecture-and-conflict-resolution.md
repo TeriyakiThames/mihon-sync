@@ -41,13 +41,13 @@ Earlier implementations relied on timestamp-based diffing (`last_modified_at` in
 ## 3. Considered Options
 
 1. **Option A: Outbox / Dirty Tracking (`is_dirty` flags)** [SELECTED]
-   - Add `is_dirty INTEGER NOT NULL DEFAULT 0` to SQLite tables (`mangas`, `chapters`, `history`).
+   - Add `is_dirty INTEGER NOT NULL DEFAULT 0` to SQLite tables (`manga`, `chapter`, `history`).
    - SQLite update/version triggers set `is_dirty = 1` only when `new.is_syncing = 0 AND old.is_syncing = 0`.
    - Incoming remote updates merged during sync set `is_syncing = 1`, bypassing `is_dirty`.
    - Sync extracts only rows marked `is_dirty = 1`, pushing them and clearing `is_dirty = 0` on success.
 2. **Option B: Pure Local Monotonic Timestamps**
    - Retain timestamp diffing but never advance push watermark to remote timestamps.
-   - Vulnerable to remote records touching `last_modified_at` or `history.last_read` during merge and causing echo loops.
+   - Vulnerable to remote records touching `last_modified_at` or `history.read_at` during merge and causing echo loops.
 
 ---
 
@@ -56,7 +56,7 @@ Earlier implementations relied on timestamp-based diffing (`last_modified_at` in
 We selected **Option A (Outbox Dirty Tracking)** alongside refined lifecycle and conflict resolution policies:
 
 ### 4.1 Outbox Dirty Tracking & Echo Elimination
-- SQLite tables (`mangas`, `chapters`, `history`) track unpushed local changes via `is_dirty = 1`.
+- SQLite tables (`manga`, `chapter`, `history`) track unpushed local changes via `is_dirty = 1`.
 - Triggers activate only on user-initiated local modifications (`is_syncing = 0`).
 - Sync merges set `is_syncing = 1`, ensuring pulled items are never tagged dirty.
 - Diff extraction queries dirty rows directly (`is_dirty = 1`). On push confirmation, dirty flags for the pushed batch are cleared (`is_dirty = 0`).

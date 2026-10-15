@@ -35,8 +35,9 @@ mihon-sync/
 │   ├── ui/
 │   │   ├── main/MainActivity.kt         # Modified: onPause() -> triggerSync()
 │   │   └── reader/ReaderActivity.kt     # Modified: onPause() & chapter transition observer
-├── data/src/main/sqldelight/tachiyomi/data/
-│   └── sync.sq                          # Added: SQL queries for timestamp-based row extraction
+├── data/src/main/sqldelight/tachiyomi/
+│   ├── data/sync.sq                     # Added: SQL queries for timestamp and dirty-based row extraction
+│   └── migrations/20.sqm                # Added: Re-adds sync columns (is_syncing, is_dirty, last_modified_at) and triggers
 ├── i18n/src/commonMain/moko-resources/base/
 │   └── strings.xml                      # Modified: Added sync localization strings
 └── mihon/app/di/
@@ -48,14 +49,15 @@ mihon-sync/
 ## 2. Database Timestamp Nuance (Critical)
 
 Pay close attention to timestamp resolution differences in SQLite:
-- **`chapters.last_modified_at` and `mangas.last_modified_at`** are populated by SQLite triggers using `strftime('%s', 'now')` — they are stored in **SECONDS** since epoch.
-- **`history.last_read` and sync network payloads** are stored in **MILLISECONDS** since epoch.
+- **`chapter.last_modified_at` and `manga.last_modified_at`** are populated by SQLite triggers using `strftime('%s', 'now')` — they are stored in **SECONDS** since epoch.
+- **`history.read_at` and sync network payloads** are stored in **MILLISECONDS** since epoch.
 
 `SyncDiffEngine.kt` handles this translation:
 ```kotlin
 val sinceSeconds = sinceTimestampMillis / 1000L
-// Queries chapters and mangas with sinceSeconds
-// Queries history with Date(sinceTimestampMillis)
+val sinceInstant = if (sinceTimestampMillis > 0) Instant.fromEpochMilliseconds(sinceTimestampMillis) else null
+// Queries chapter and manga with sinceSeconds
+// Queries history with sinceInstant
 ```
 Any future queries must respect this second vs. millisecond distinction.
 

@@ -1,0 +1,42 @@
+ALTER TABLE manga ADD COLUMN is_syncing INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE manga ADD COLUMN is_dirty INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE manga ADD COLUMN last_modified_at INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE manga ADD COLUMN favorite_modified_at INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE chapter ADD COLUMN is_syncing INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE chapter ADD COLUMN is_dirty INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE chapter ADD COLUMN last_modified_at INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE history ADD COLUMN is_dirty INTEGER NOT NULL DEFAULT 0;
+
+DROP TRIGGER IF EXISTS update_last_modified_at_chapters;
+CREATE TRIGGER update_last_modified_at_chapters
+AFTER UPDATE ON chapter
+FOR EACH ROW
+WHEN new.is_syncing = 0 AND old.is_syncing = 0
+BEGIN
+  UPDATE chapter
+  SET last_modified_at = strftime('%s', 'now'), is_dirty = 1
+  WHERE id = new.id;
+END;
+
+DROP TRIGGER IF EXISTS update_last_favorited_at_mangas;
+CREATE TRIGGER update_last_favorited_at_mangas
+AFTER UPDATE OF user_favorite_at ON manga
+WHEN new.is_syncing = 0 AND old.is_syncing = 0
+BEGIN
+  UPDATE manga
+  SET favorite_modified_at = strftime('%s', 'now'), is_dirty = 1
+  WHERE id = new.id;
+END;
+
+DROP TRIGGER IF EXISTS update_last_modified_at_mangas;
+CREATE TRIGGER update_last_modified_at_mangas
+AFTER UPDATE ON manga
+FOR EACH ROW
+WHEN new.is_syncing = 0 AND old.is_syncing = 0
+BEGIN
+  UPDATE manga
+  SET last_modified_at = strftime('%s', 'now'), is_dirty = 1
+  WHERE id = new.id;
+END;

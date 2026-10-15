@@ -26,7 +26,9 @@ class CryptoUtilTest {
         for (i in 1..200) {
             if (i > 1) jsonBuilder.append(",")
             jsonBuilder.append(
-                """{"source":1,"url":"/manga/$i","title":"Manga Title $i","description":"A long description of the manga story and adventure details repeated multiple times.","genre":["Action","Adventure","Fantasy"],"favorite":true}"""
+                """{"source":1,"url":"/manga/$i","title":"Manga Title $i",""" +
+                    """"description":"A long description of the manga story and adventure details repeated.", """ +
+                    """"genre":["Action","Adventure","Fantasy"],"favorite":true}""",
             )
         }
         jsonBuilder.append("]}")
@@ -42,7 +44,7 @@ class CryptoUtilTest {
         val ciphertextSize = ciphertext.length
         assertTrue(
             ciphertextSize < rawByteSize / 3,
-            "Ciphertext ($ciphertextSize chars) should be significantly smaller than raw JSON ($rawByteSize bytes)"
+            "Ciphertext ($ciphertextSize chars) should be significantly smaller than raw JSON ($rawByteSize bytes)",
         )
         assertEquals(jsonPayload, decrypted)
     }
