@@ -6,8 +6,10 @@ import app.cash.sqldelight.async.coroutines.awaitAsOneOrNull
 import dev.zacsweers.metro.AppScope
 import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
+import eu.kanade.tachiyomi.source.model.UpdateStrategy
+import kotlinx.serialization.json.JsonObject
 import tachiyomi.data.Database
-import java.util.Date
+import kotlin.time.Instant
 
 /**
  * Merges remote synchronization payloads into the local SQLDelight database.
@@ -42,9 +44,9 @@ class SyncMerger(
                         order = remoteCategory.order,
                         flags = remoteCategory.flags,
                     ).awaitAsOne()
-                } else if (localCategory.sort != remoteCategory.order || localCategory.flags != remoteCategory.flags) {
+                } else if (localCategory.order != remoteCategory.order || localCategory.flags != remoteCategory.flags) {
                     database.syncQueries.updateCategory(
-                        id = localCategory._id,
+                        id = localCategory.id,
                         order = remoteCategory.order,
                         flags = remoteCategory.flags,
                     )
@@ -58,23 +60,33 @@ class SyncMerger(
                     .awaitAsOneOrNull()
 
                 if (localManga == null) {
+                    val userFavoriteAt = if (remoteManga.favorite) {
+                        if (remoteManga.dateAdded > 0) {
+                            Instant.fromEpochMilliseconds(remoteManga.dateAdded)
+                        } else {
+                            Instant.fromEpochSeconds(remoteManga.lastModifiedAt)
+                        }
+                    } else {
+                        null
+                    }
+
                     val newId = database.syncQueries.insertSyncManga(
                         source = remoteManga.source,
                         url = remoteManga.url,
-                        artist = remoteManga.artist,
+                        title = remoteManga.title,
                         author = remoteManga.author,
+                        artist = remoteManga.artist,
                         description = remoteManga.description,
                         genre = remoteManga.genre,
-                        title = remoteManga.title,
                         status = remoteManga.status,
                         thumbnailUrl = remoteManga.thumbnailUrl,
-                        favorite = remoteManga.favorite,
-                        chapterFlags = remoteManga.chapterFlags,
+                        updateStrategy = UpdateStrategy.ALWAYS_UPDATE,
+                        memo = JsonObject(emptyMap()),
+                        userFavoriteAt = userFavoriteAt,
                         viewerFlags = remoteManga.viewerFlags,
-                        dateAdded = remoteManga.dateAdded,
+                        chapterFlags = remoteManga.chapterFlags,
                         lastModifiedAt = remoteManga.lastModifiedAt,
-                        favoriteModifiedAt = remoteManga.favoriteModifiedAt,
-                        version = remoteManga.version,
+                        favoriteModifiedAt = remoteManga.favoriteModifiedAt ?: 0L,
                     ).awaitAsOne()
 
                     // Associate categories for the newly inserted manga
@@ -83,56 +95,45 @@ class SyncMerger(
                             .getCategoryByName(categoryName)
                             .awaitAsOneOrNull()
                         if (category != null) {
-                            database.syncQueries.insertMangaCategory(newId, category._id)
+                            database.syncQueries.insertMangaCategory(newId, category.id)
                         }
                     }
                 } else {
                     val remoteFavMod = remoteManga.favoriteModifiedAt ?: remoteManga.lastModifiedAt
                     val localFavMod = localManga.favorite_modified_at ?: localManga.last_modified_at
+                    val isLocalFavorite = localManga.user_favorite_at != null
 
-                    if (remoteFavMod > localFavMod) {
-                        if (localManga.favorite != remoteManga.favorite) {
-                            database.mangasQueries.update(
-                                mangaId = localManga._id,
-                                source = null,
-                                url = null,
-                                artist = null,
-                                author = null,
-                                description = null,
-                                genre = null,
-                                title = null,
-                                status = null,
-                                thumbnailUrl = null,
-                                favorite = remoteManga.favorite,
-                                lastUpdate = null,
-                                nextUpdate = null,
-                                initialized = null,
-                                viewer = null,
-                                chapterFlags = null,
-                                coverLastModified = null,
-                                dateAdded = null,
-                                updateStrategy = null,
-                                calculateInterval = null,
-                                version = null,
-                                isSyncing = 1L,
-                                notes = null,
-                                memo = null,
-                            )
+                    if (remoteFavMod > localFavMod && isLocalFavorite != remoteManga.favorite) {
+                        val newFavAt = if (remoteManga.favorite) {
+                            if (remoteManga.dateAdded > 0) {
+                                Instant.fromEpochMilliseconds(remoteManga.dateAdded)
+                            } else {
+                                Instant.fromEpochSeconds(remoteManga.lastModifiedAt)
+                            }
+                        } else {
+                            null
                         }
+
+                        database.syncQueries.updateSyncMangaFavorite(
+                            id = localManga.id,
+                            userFavoriteAt = newFavAt,
+                            favoriteModifiedAt = remoteFavMod,
+                            lastModifiedAt = remoteManga.lastModifiedAt,
+                        )
                     }
 
-                    val currentCategories = database.syncQueries.getCategoriesForManga(localManga._id).awaitAsList()
+                    val currentCategories = database.syncQueries.getCategoriesForManga(localManga.id).awaitAsList()
                     val currentCategoryNames = currentCategories.map { it.name }.toSet()
                     val remoteCategoryNames = remoteManga.categories.toSet()
 
                     if (currentCategoryNames != remoteCategoryNames) {
-                        database.syncQueries.deleteMangaCategoriesForManga(localManga._id)
+                        database.syncQueries.deleteMangaCategoriesForManga(localManga.id)
                         for (categoryName in remoteManga.categories) {
                             val category = database.syncQueries
                                 .getCategoryByName(categoryName)
                                 .awaitAsOneOrNull()
                             if (category != null) {
-                                database.syncQueries.insertMangaCategory(localManga._id, category._id)
+                                database.syncQueries.insertMangaCategory(localManga.id, category.id)
                             }
                         }
                     }
@@ -146,53 +147,47 @@ class SyncMerger(
                     .awaitAsOneOrNull() ?: continue
 
                 val localChapter = database.syncQueries
-                    .getChapterByMangaIdAndUrl(localManga._id, remoteChapter.chapterUrl)
+                    .getChapterByMangaIdAndUrl(localManga.id, remoteChapter.chapterUrl)
                     .awaitAsOneOrNull()
 
                 if (localChapter == null) {
                     database.syncQueries.insertSyncChapter(
-                        mangaId = localManga._id,
+                        mangaId = localManga.id,
                         url = remoteChapter.chapterUrl,
                         name = remoteChapter.chapterName ?: "",
                         scanlator = remoteChapter.scanlator,
+                        chapterNumber = remoteChapter.chapterNumber,
+                        memo = JsonObject(emptyMap()),
                         read = remoteChapter.read,
                         bookmark = remoteChapter.bookmark,
-                        lastPageRead = remoteChapter.lastPageRead,
-                        chapterNumber = remoteChapter.chapterNumber,
+                        lastPageRead = remoteChapter.lastPageRead.toInt(),
+                        stateDateFetch = Instant.fromEpochMilliseconds(System.currentTimeMillis()),
                         lastModifiedAt = remoteChapter.lastModifiedAt,
-                        version = remoteChapter.version,
                     ).awaitAsOne()
                 } else {
-                    val isRemoteNewer = remoteChapter.version > localChapter.version ||
-                        remoteChapter.lastModifiedAt > localChapter.last_modified_at
+                    val isRemoteNewer = remoteChapter.lastModifiedAt > localChapter.last_modified_at
 
                     // Last-Write-Wins (LWW) conflict resolution: if remote is strictly newer,
                     // accept its read status, page progress, and bookmark.
-                    val newRead = if (isRemoteNewer) remoteChapter.read else localChapter.read
-                    val newLastPageRead = if (isRemoteNewer) remoteChapter.lastPageRead else localChapter.last_page_read
-                    val newBookmark = if (isRemoteNewer) remoteChapter.bookmark else localChapter.bookmark
+                    val newRead = if (isRemoteNewer) remoteChapter.read else localChapter.user_read
+                    val newLastPageRead = if (isRemoteNewer) {
+                        remoteChapter.lastPageRead.toInt()
+                    } else {
+                        localChapter.user_last_page_read
+                    }
+                    val newBookmark = if (isRemoteNewer) remoteChapter.bookmark else localChapter.user_bookmark
 
                     // Only update if state has changed
-                    if (newRead != localChapter.read ||
-                        newLastPageRead != localChapter.last_page_read ||
-                        newBookmark != localChapter.bookmark
+                    if (newRead != localChapter.user_read ||
+                        newLastPageRead != localChapter.user_last_page_read ||
+                        newBookmark != localChapter.user_bookmark
                     ) {
-                        database.chaptersQueries.update(
-                            chapterId = localChapter._id,
-                            mangaId = null,
-                            url = null,
-                            name = null,
-                            scanlator = null,
+                        database.syncQueries.updateSyncChapter(
+                            id = localChapter.id,
                             read = newRead,
                             bookmark = newBookmark,
                             lastPageRead = newLastPageRead,
-                            chapterNumber = null,
-                            sourceOrder = null,
-                            dateFetch = null,
-                            dateUpload = null,
-                            version = null,
-                            isSyncing = 1L,
-                            memo = null,
+                            lastModifiedAt = maxOf(remoteChapter.lastModifiedAt, localChapter.last_modified_at),
                         )
                     }
                 }
@@ -205,22 +200,23 @@ class SyncMerger(
                     .awaitAsOneOrNull() ?: continue
 
                 val localChapter = database.syncQueries
-                    .getChapterByMangaIdAndUrl(localManga._id, remoteHistory.chapterUrl)
+                    .getChapterByMangaIdAndUrl(localManga.id, remoteHistory.chapterUrl)
                     .awaitAsOneOrNull() ?: continue
 
-                val localHistory = database.historyQueries
-                    .getHistoryByChapterUrlAndMangaId(remoteHistory.chapterUrl, localManga._id)
+                val localHistory = database.syncQueries
+                    .getHistoryByChapterId(localChapter.id)
                     .awaitAsOneOrNull()
 
-                val localLastReadMillis = localHistory?.last_read?.time ?: 0L
-                val currentDuration = localHistory?.time_read ?: 0L
+                val localLastReadMillis = localHistory?.read_at?.toEpochMilliseconds() ?: 0L
+                val currentDuration = localHistory?.read_duration ?: 0L
                 val targetDuration = maxOf(remoteHistory.timeRead, currentDuration)
                 val deltaDuration = targetDuration - currentDuration
                 if (deltaDuration > 0 || remoteHistory.lastRead > localLastReadMillis) {
                     database.syncQueries.upsertSyncHistory(
-                        chapterId = localChapter._id,
-                        readAt = Date(maxOf(remoteHistory.lastRead, localLastReadMillis)),
-                        time_read = deltaDuration,
+                        mangaId = localManga.id,
+                        chapterId = localChapter.id,
+                        readAt = Instant.fromEpochMilliseconds(maxOf(remoteHistory.lastRead, localLastReadMillis)),
+                        timeRead = deltaDuration,
                     )
                 }
             }

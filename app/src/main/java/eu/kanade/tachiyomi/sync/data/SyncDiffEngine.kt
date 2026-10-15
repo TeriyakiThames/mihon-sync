@@ -6,14 +6,14 @@ import dev.zacsweers.metro.Inject
 import dev.zacsweers.metro.SingleIn
 import eu.kanade.tachiyomi.sync.service.SyncPreferences
 import tachiyomi.data.Database
-import java.util.Date
+import kotlin.time.Instant
 
 /**
  * Extracts database modifications occurring after a given epoch millisecond timestamp.
  *
  * Handles the timestamp resolution disparity:
  * - chapters.last_modified_at and mangas.last_modified_at are stored in SECONDS (SQLite strftime('%s', 'now'))
- * - history.last_read and sync network payloads are represented in MILLISECONDS (epoch ms / DateColumnAdapter)
+ * - history.read_at and sync network payloads are represented in MILLISECONDS (epoch ms)
  */
 @Inject
 @SingleIn(AppScope::class)
@@ -39,7 +39,7 @@ class SyncDiffEngine(
      */
     suspend fun extractDiff(sinceTimestampMillis: Long): SyncPayload {
         val sinceSeconds = if (sinceTimestampMillis > 0) sinceTimestampMillis / 1000L else 0L
-        val sinceDate = Date(sinceTimestampMillis)
+        val sinceInstant = if (sinceTimestampMillis > 0) Instant.fromEpochMilliseconds(sinceTimestampMillis) else null
 
         // 1. Extract modified chapters
         val chapterRows = database.syncQueries
@@ -55,17 +55,17 @@ class SyncDiffEngine(
                 chapterName = row.chapterName,
                 read = row.read,
                 bookmark = row.bookmark,
-                lastPageRead = row.lastPageRead,
+                lastPageRead = row.lastPageRead.toLong(),
                 chapterNumber = row.chapterNumber,
                 scanlator = row.scanlator,
                 lastModifiedAt = row.lastModifiedAt,
-                version = row.version,
+                version = 0L,
             )
         }
 
         // 2. Extract modified history
         val historyRows = database.syncQueries
-            .getModifiedHistory(sinceTimestampMillis)
+            .getModifiedHistory(sinceInstant)
             .awaitAsList()
         lastExtractedHistoryIds = historyRows.map { it.historyId }
 
@@ -74,7 +74,7 @@ class SyncDiffEngine(
                 mangaSource = row.mangaSource,
                 mangaUrl = row.mangaUrl,
                 chapterUrl = row.chapterUrl,
-                lastRead = row.lastRead?.time ?: 0L,
+                lastRead = row.readAt?.toEpochMilliseconds() ?: 0L,
                 timeRead = row.timeRead,
             )
         }
@@ -104,11 +104,11 @@ class SyncDiffEngine(
                 favorite = row.favorite,
                 chapterFlags = row.chapterFlags,
                 viewerFlags = row.viewerFlags,
-                dateAdded = row.dateAdded,
+                dateAdded = row.favoriteAt?.toEpochMilliseconds() ?: 0L,
                 categories = categories,
                 lastModifiedAt = row.lastModifiedAt,
                 favoriteModifiedAt = row.favoriteModifiedAt,
-                version = row.version,
+                version = 0L,
             )
         }
 
@@ -125,38 +125,31 @@ class SyncDiffEngine(
             )
         }
 
-        val deviceId = syncPreferences?.deviceId?.get() ?: ""
-
         return SyncPayload(
-            deviceId = deviceId,
+            deviceId = syncPreferences?.deviceId?.get() ?: "",
             clientTimestamp = System.currentTimeMillis(),
             mangas = mangas,
             chapters = chapters,
             history = history,
             categories = categories,
-            settings = emptyMap(),
         )
     }
 
     /**
-     * Clears the is_dirty flags on entities that were extracted in the most recent extractDiff call.
-     * This is invoked after successfully pushing changes to origin.
+     * Clears local `is_dirty` flags on all rows extracted during the previous [extractDiff] call.
      */
     suspend fun clearLastExtractedDirty() {
-        val chapterIds = lastExtractedChapterIds
-        val mangaIds = lastExtractedMangaIds
-        val historyIds = lastExtractedHistoryIds
-
-        database.transaction {
-            if (chapterIds.isNotEmpty()) {
-                database.syncQueries.clearDirtyChaptersByIds(chapterIds)
-            }
-            if (mangaIds.isNotEmpty()) {
-                database.syncQueries.clearDirtyMangasByIds(mangaIds)
-            }
-            if (historyIds.isNotEmpty()) {
-                database.syncQueries.clearDirtyHistoryByIds(historyIds)
-            }
+        if (lastExtractedChapterIds.isNotEmpty()) {
+            database.syncQueries.clearDirtyChaptersByIds(lastExtractedChapterIds)
+            lastExtractedChapterIds = emptyList()
+        }
+        if (lastExtractedMangaIds.isNotEmpty()) {
+            database.syncQueries.clearDirtyMangasByIds(lastExtractedMangaIds)
+            lastExtractedMangaIds = emptyList()
+        }
+        if (lastExtractedHistoryIds.isNotEmpty()) {
+            database.syncQueries.clearDirtyHistoryByIds(lastExtractedHistoryIds)
+            lastExtractedHistoryIds = emptyList()
         }
     }
 }

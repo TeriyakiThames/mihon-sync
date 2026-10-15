@@ -103,7 +103,9 @@ object SettingsSyncScreen : SearchableSettings {
                                     syncManager.syncNow(force = true)
                                 }
                             } catch (e: Exception) {
-                                context.toast("${context.stringResource(MR.strings.pref_sync_pairing_invalid)}: ${e.message}")
+                                context.toast(
+                                    "${context.stringResource(MR.strings.pref_sync_pairing_invalid)}: ${e.message}",
+                                )
                             }
                         },
                     ) {
@@ -160,9 +162,8 @@ object SettingsSyncScreen : SearchableSettings {
                         } else {
                             stringResource(MR.strings.pref_sync_never)
                         },
-                        enabled = isSyncEnabled && syncPreferences.isConfigured() && !isSyncing,
-                        onClick = {
-                            if (!isSyncing) {
+                        onClick = if (isSyncEnabled && syncPreferences.isConfigured() && !isSyncing) {
+                            {
                                 isManualSyncing = true
                                 scope.launch {
                                     val success = try {
@@ -177,6 +178,8 @@ object SettingsSyncScreen : SearchableSettings {
                                     }
                                 }
                             }
+                        } else {
+                            null
                         },
                     ),
                 ),
@@ -187,27 +190,32 @@ object SettingsSyncScreen : SearchableSettings {
                     Preference.PreferenceItem.TextPreference(
                         title = stringResource(MR.strings.pref_sync_share_pairing),
                         subtitle = stringResource(MR.strings.pref_sync_share_pairing_summary),
-                        enabled = syncPreferences.isConfigured(),
-                        onClick = {
-                            try {
-                                val uri = SyncPairingUtil.createPairingUri(
-                                    serverUrl = syncPreferences.serverUrl.get(),
-                                    roomId = syncPreferences.roomId.get(),
-                                    secretKey = syncPreferences.encryptionKey.get(),
-                                )
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                val clip = ClipData.newPlainText("Mihon Sync Pairing Link", uri)
-                                clipboard.setPrimaryClip(clip)
-                                context.toast(MR.strings.pref_sync_pairing_link_copied)
+                        onClick = if (syncPreferences.isConfigured()) {
+                            {
+                                try {
+                                    val uri = SyncPairingUtil.createPairingUri(
+                                        serverUrl = syncPreferences.serverUrl.get(),
+                                        roomId = syncPreferences.roomId.get(),
+                                        secretKey = syncPreferences.encryptionKey.get(),
+                                    )
+                                    val clipboard = context.getSystemService(
+                                        Context.CLIPBOARD_SERVICE,
+                                    ) as ClipboardManager
+                                    val clip = ClipData.newPlainText("Mihon Sync Pairing Link", uri)
+                                    clipboard.setPrimaryClip(clip)
+                                    context.toast(MR.strings.pref_sync_pairing_link_copied)
 
-                                val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                                    type = "text/plain"
-                                    putExtra(Intent.EXTRA_TEXT, uri)
+                                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(Intent.EXTRA_TEXT, uri)
+                                    }
+                                    context.startActivity(Intent.createChooser(shareIntent, null))
+                                } catch (e: Exception) {
+                                    context.toast("Error generating pairing link: ${e.message}")
                                 }
-                                context.startActivity(Intent.createChooser(shareIntent, null))
-                            } catch (e: Exception) {
-                                context.toast("Error generating pairing link: ${e.message}")
                             }
+                        } else {
+                            null
                         },
                     ),
                     Preference.PreferenceItem.TextPreference(
@@ -250,8 +258,11 @@ object SettingsSyncScreen : SearchableSettings {
                     Preference.PreferenceItem.TextPreference(
                         title = stringResource(MR.strings.pref_sync_clear),
                         subtitle = stringResource(MR.strings.pref_sync_clear_summary),
-                        enabled = syncPreferences.isConfigured(),
-                        onClick = { showClearConfirmDialog = true },
+                        onClick = if (syncPreferences.isConfigured()) {
+                            { showClearConfirmDialog = true }
+                        } else {
+                            null
+                        },
                     ),
                 ),
             ),
