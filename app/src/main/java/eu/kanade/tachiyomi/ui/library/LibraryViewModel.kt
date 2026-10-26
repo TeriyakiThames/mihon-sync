@@ -152,8 +152,11 @@ class LibraryViewModel(
         combine(tracks, getTrackingFiltersFlow(), ::Pair),
         getLibraryItemPreferencesFlow(),
     ) { searchQuery, categories, favorites, (tracksMap, trackingFilters), itemPreferences ->
-        val showSystemCategory = favorites.any { it.libraryManga.categories.contains(0) }
-        val filteredFavorites = favorites
+        val deduplicatedFavorites = favorites.distinctBy {
+            Triple(it.libraryManga.manga.source, it.libraryManga.manga.url.trimEnd('/'), it.libraryManga.manga.title.trim().lowercase())
+        }
+        val showSystemCategory = deduplicatedFavorites.any { it.libraryManga.categories.contains(0) }
+        val filteredFavorites = deduplicatedFavorites
             .applyFilters(tracksMap, trackingFilters, itemPreferences)
             .let { libraryItems ->
                 if (searchQuery.isNullOrEmpty()) {
@@ -291,10 +294,10 @@ class LibraryViewModel(
         categories: List<Category>,
         showSystemCategory: Boolean,
     ): Map<Category, List</* LibraryItem */ Long>> {
-        val groupCache = mutableMapOf</* Category */ Long, MutableList</* LibraryItem */ Long>>()
+        val groupCache = mutableMapOf</* Category */ Long, LinkedHashSet</* LibraryItem */ Long>>()
         forEach { item ->
-            item.libraryManga.categories.forEach { categoryId ->
-                groupCache.getOrPut(categoryId) { mutableListOf() }.add(item.id)
+            item.libraryManga.categories.distinct().forEach { categoryId ->
+                groupCache.getOrPut(categoryId) { LinkedHashSet() }.add(item.id)
             }
         }
         return categories.filter { showSystemCategory || !it.isSystemCategory }

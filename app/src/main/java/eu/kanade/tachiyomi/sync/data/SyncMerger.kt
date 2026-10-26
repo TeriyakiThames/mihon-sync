@@ -18,6 +18,7 @@ import kotlin.time.Instant
  * 1. Monotonic Forward Reading Progress: advances chapter read status and page progress forward safely.
  * 2. Last-Write-Wins (LWW): applies bookmark and favorite updates when remote timestamps/versions are newer.
  * 3. Loop Prevention: uses `is_syncing = 1` during updates to suppress SQLite version increment triggers.
+ * 4. Deduplication: performs normalized URL and natural identity matching to avoid duplicate library records.
  */
 @Inject
 @SingleIn(AppScope::class)
@@ -33,7 +34,7 @@ class SyncMerger(
     suspend fun merge(remotePayload: SyncPayload) {
         database.transaction {
             // 1. Merge Categories
-            for (remoteCategory in remotePayload.categories) {
+            for (remoteCategory in remotePayload.categories.filter { it.name.isNotBlank() }) {
                 val localCategory = database.syncQueries
                     .getCategoryByName(remoteCategory.name)
                     .awaitAsOneOrNull()
@@ -55,10 +56,9 @@ class SyncMerger(
 
             // 2. Merge Mangas
             for (remoteManga in remotePayload.mangas) {
-                val localManga = database.syncQueries
-                    .getMangaBySourceAndUrl(remoteManga.source, remoteManga.url)
-                    .awaitAsOneOrNull()
+                val localManga = findLocalManga(remoteManga.source, remoteManga.url, remoteManga.title)
 
+                val targetMangaId: Long
                 if (localManga == null) {
                     val userFavoriteAt = if (remoteManga.favorite) {
                         if (remoteManga.dateAdded > 0) {
@@ -70,7 +70,7 @@ class SyncMerger(
                         null
                     }
 
-                    val newId = database.syncQueries.insertSyncManga(
+                    targetMangaId = database.syncQueries.insertSyncManga(
                         source = remoteManga.source,
                         url = remoteManga.url,
                         title = remoteManga.title,
@@ -90,17 +90,18 @@ class SyncMerger(
                     ).awaitAsOne()
 
                     // Associate categories for the newly inserted manga
-                    for (categoryName in remoteManga.categories) {
+                    for (categoryName in remoteManga.categories.filter { it.isNotBlank() }.distinct()) {
                         val category = database.syncQueries
                             .getCategoryByName(categoryName)
                             .awaitAsOneOrNull()
-                        if (category != null) {
-                            database.syncQueries.insertMangaCategory(newId, category.id)
+                        if (category != null && category.id > 0) {
+                            database.syncQueries.insertMangaCategory(targetMangaId, category.id)
                         }
                     }
                 } else {
+                    targetMangaId = localManga.id
                     val remoteFavMod = remoteManga.favoriteModifiedAt ?: remoteManga.lastModifiedAt
-                    val localFavMod = localManga.favorite_modified_at ?: localManga.last_modified_at
+                    val localFavMod = localManga.favorite_modified_at
                     val isLocalFavorite = localManga.user_favorite_at != null
 
                     if (remoteFavMod > localFavMod && isLocalFavorite != remoteManga.favorite) {
@@ -123,32 +124,42 @@ class SyncMerger(
                     }
 
                     val currentCategories = database.syncQueries.getCategoriesForManga(localManga.id).awaitAsList()
-                    val currentCategoryNames = currentCategories.map { it.name }.toSet()
-                    val remoteCategoryNames = remoteManga.categories.toSet()
+                    val currentCategoryNames = currentCategories.map { it.name }.filter { it.isNotBlank() }.toSet()
+                    val remoteCategoryNames = remoteManga.categories.filter { it.isNotBlank() }.toSet()
 
                     if (currentCategoryNames != remoteCategoryNames) {
                         database.syncQueries.deleteMangaCategoriesForManga(localManga.id)
-                        for (categoryName in remoteManga.categories) {
+                        for (categoryName in remoteCategoryNames) {
                             val category = database.syncQueries
                                 .getCategoryByName(categoryName)
                                 .awaitAsOneOrNull()
-                            if (category != null) {
+                            if (category != null && category.id > 0) {
                                 database.syncQueries.insertMangaCategory(localManga.id, category.id)
                             }
                         }
+                    }
+                }
+
+                // Consolidate any duplicate favorite records locally for this source and title
+                if (remoteManga.title.isNotBlank()) {
+                    val duplicates = database.syncQueries
+                        .getDuplicateFavoritesForSourceAndTitle(
+                            source = remoteManga.source,
+                            title = remoteManga.title,
+                            keepId = targetMangaId,
+                        )
+                        .awaitAsList()
+                    for (dup in duplicates) {
+                        database.syncQueries.unfavoriteManga(dup.id)
                     }
                 }
             }
 
             // 3. Merge Chapters
             for (remoteChapter in remotePayload.chapters) {
-                val localManga = database.syncQueries
-                    .getMangaBySourceAndUrl(remoteChapter.mangaSource, remoteChapter.mangaUrl)
-                    .awaitAsOneOrNull() ?: continue
+                val localManga = findLocalManga(remoteChapter.mangaSource, remoteChapter.mangaUrl) ?: continue
 
-                val localChapter = database.syncQueries
-                    .getChapterByMangaIdAndUrl(localManga.id, remoteChapter.chapterUrl)
-                    .awaitAsOneOrNull()
+                val localChapter = findLocalChapter(localManga.id, remoteChapter.chapterUrl, remoteChapter.chapterNumber)
 
                 if (localChapter == null) {
                     database.syncQueries.insertSyncChapter(
@@ -195,13 +206,9 @@ class SyncMerger(
 
             // 4. Merge Reading History
             for (remoteHistory in remotePayload.history) {
-                val localManga = database.syncQueries
-                    .getMangaBySourceAndUrl(remoteHistory.mangaSource, remoteHistory.mangaUrl)
-                    .awaitAsOneOrNull() ?: continue
+                val localManga = findLocalManga(remoteHistory.mangaSource, remoteHistory.mangaUrl) ?: continue
 
-                val localChapter = database.syncQueries
-                    .getChapterByMangaIdAndUrl(localManga.id, remoteHistory.chapterUrl)
-                    .awaitAsOneOrNull() ?: continue
+                val localChapter = findLocalChapter(localManga.id, remoteHistory.chapterUrl) ?: continue
 
                 val localHistory = database.syncQueries
                     .getHistoryByChapterId(localChapter.id)
@@ -225,5 +232,49 @@ class SyncMerger(
             database.syncQueries.resetAllChapterIsSyncing()
             database.syncQueries.resetAllMangaIsSyncing()
         }
+    }
+
+    private suspend fun findLocalManga(source: Long, url: String, title: String? = null): tachiyomi.data.Manga? {
+        val exact = database.syncQueries.getMangaBySourceAndUrl(source, url).awaitAsOneOrNull()
+        if (exact != null) return exact
+
+        val trimmed = url.trimEnd('/')
+        if (trimmed != url) {
+            val byTrimmed = database.syncQueries.getMangaBySourceAndUrl(source, trimmed).awaitAsOneOrNull()
+            if (byTrimmed != null) return byTrimmed
+        } else {
+            val withSlash = "$url/"
+            val bySlash = database.syncQueries.getMangaBySourceAndUrl(source, withSlash).awaitAsOneOrNull()
+            if (bySlash != null) return bySlash
+        }
+
+        if (!title.isNullOrBlank()) {
+            val byTitle = database.syncQueries.getMangaBySourceAndTitle(source, title).awaitAsOneOrNull()
+            if (byTitle != null) return byTitle
+        }
+
+        return null
+    }
+
+    private suspend fun findLocalChapter(mangaId: Long, chapterUrl: String, chapterNumber: Double? = null): tachiyomi.data.Chapter? {
+        val exact = database.syncQueries.getChapterByMangaIdAndUrl(mangaId, chapterUrl).awaitAsOneOrNull()
+        if (exact != null) return exact
+
+        val trimmed = chapterUrl.trimEnd('/')
+        if (trimmed != chapterUrl) {
+            val byTrimmed = database.syncQueries.getChapterByMangaIdAndUrl(mangaId, trimmed).awaitAsOneOrNull()
+            if (byTrimmed != null) return byTrimmed
+        } else {
+            val withSlash = "$chapterUrl/"
+            val bySlash = database.syncQueries.getChapterByMangaIdAndUrl(mangaId, withSlash).awaitAsOneOrNull()
+            if (bySlash != null) return bySlash
+        }
+
+        if (chapterNumber != null && chapterNumber > 0.0) {
+            val byNumber = database.syncQueries.getChapterByMangaIdAndNumber(mangaId, chapterNumber).awaitAsOneOrNull()
+            if (byNumber != null) return byNumber
+        }
+
+        return null
     }
 }

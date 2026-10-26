@@ -80,11 +80,37 @@ FROM manga
 WHERE source_id = :source AND remote_url = :url
 LIMIT 1;
 
+-- Helper to find local manga by source and title
+getMangaBySourceAndTitle:
+SELECT *
+FROM manga
+WHERE source_id = :source AND remote_title = :title
+LIMIT 1;
+
+-- Helper to find duplicate favorites by source and title excluding the keeper
+getDuplicateFavoritesForSourceAndTitle:
+SELECT *
+FROM manga
+WHERE source_id = :source AND remote_title = :title AND user_favorite_at IS NOT NULL AND id != :keepId;
+
+-- Helper to unfavorite a duplicate manga without marking dirty
+unfavoriteManga:
+UPDATE manga
+SET user_favorite_at = NULL, is_dirty = 0
+WHERE id = :id;
+
 -- Helper to find local chapter by parent manga ID and chapter URL
 getChapterByMangaIdAndUrl:
 SELECT *
 FROM chapter
 WHERE manga_id = :mangaId AND remote_url = :chapterUrl
+LIMIT 1;
+
+-- Helper to find local chapter by parent manga ID and chapter number
+getChapterByMangaIdAndNumber:
+SELECT *
+FROM chapter
+WHERE manga_id = :mangaId AND remote_chapter_number = :chapterNumber
 LIMIT 1;
 
 -- Helper to find history by chapter ID
