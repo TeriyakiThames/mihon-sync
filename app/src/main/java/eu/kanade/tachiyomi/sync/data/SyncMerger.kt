@@ -45,7 +45,10 @@ class SyncMerger(
                         order = remoteCategory.order,
                         flags = remoteCategory.flags,
                     ).awaitAsOne()
-                } else if (localCategory.order != remoteCategory.order || localCategory.flags != remoteCategory.flags) {
+                } else if (
+                    localCategory.order != remoteCategory.order ||
+                    localCategory.flags != remoteCategory.flags
+                ) {
                     database.syncQueries.updateCategory(
                         id = localCategory.id,
                         order = remoteCategory.order,
@@ -159,7 +162,11 @@ class SyncMerger(
             for (remoteChapter in remotePayload.chapters) {
                 val localManga = findLocalManga(remoteChapter.mangaSource, remoteChapter.mangaUrl) ?: continue
 
-                val localChapter = findLocalChapter(localManga.id, remoteChapter.chapterUrl, remoteChapter.chapterNumber)
+                val localChapter = findLocalChapter(
+                    mangaId = localManga.id,
+                    chapterUrl = remoteChapter.chapterUrl,
+                    chapterNumber = remoteChapter.chapterNumber,
+                )
 
                 if (localChapter == null) {
                     database.syncQueries.insertSyncChapter(
@@ -256,7 +263,11 @@ class SyncMerger(
         return null
     }
 
-    private suspend fun findLocalChapter(mangaId: Long, chapterUrl: String, chapterNumber: Double? = null): tachiyomi.data.Chapter? {
+    private suspend fun findLocalChapter(
+        mangaId: Long,
+        chapterUrl: String,
+        chapterNumber: Double? = null,
+    ): tachiyomi.data.Chapter? {
         val exact = database.syncQueries.getChapterByMangaIdAndUrl(mangaId, chapterUrl).awaitAsOneOrNull()
         if (exact != null) return exact
 
@@ -271,7 +282,9 @@ class SyncMerger(
         }
 
         if (chapterNumber != null && chapterNumber > 0.0) {
-            val byNumber = database.syncQueries.getChapterByMangaIdAndNumber(mangaId, chapterNumber).awaitAsOneOrNull()
+            val byNumber = database.syncQueries
+                .getChapterByMangaIdAndNumber(mangaId, chapterNumber)
+                .awaitAsOneOrNull()
             if (byNumber != null) return byNumber
         }
 

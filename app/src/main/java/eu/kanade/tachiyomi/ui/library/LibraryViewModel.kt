@@ -153,7 +153,11 @@ class LibraryViewModel(
         getLibraryItemPreferencesFlow(),
     ) { searchQuery, categories, favorites, (tracksMap, trackingFilters), itemPreferences ->
         val deduplicatedFavorites = favorites.distinctBy {
-            Triple(it.libraryManga.manga.source, it.libraryManga.manga.url.trimEnd('/'), it.libraryManga.manga.title.trim().lowercase())
+            Triple(
+                it.libraryManga.manga.source,
+                it.libraryManga.manga.url.trimEnd('/'),
+                it.libraryManga.manga.title.trim().lowercase(),
+            )
         }
         val showSystemCategory = deduplicatedFavorites.any { it.libraryManga.categories.contains(0) }
         val filteredFavorites = deduplicatedFavorites

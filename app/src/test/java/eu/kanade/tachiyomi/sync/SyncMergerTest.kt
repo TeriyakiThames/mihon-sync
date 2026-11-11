@@ -64,7 +64,9 @@ class SyncMergerTest {
 
         val defaultDuplicatesQuery = mockk<Query<GetDuplicateFavoritesForSourceAndTitle>>()
         coEvery { defaultDuplicatesQuery.awaitAsList() } returns emptyList()
-        every { syncQueries.getDuplicateFavoritesForSourceAndTitle(any(), any(), any()) } returns defaultDuplicatesQuery
+        every {
+            syncQueries.getDuplicateFavoritesForSourceAndTitle(any(), any(), any())
+        } returns defaultDuplicatesQuery
 
         val defaultCatQuery = mockk<Query<GetCategoriesForManga>>()
         coEvery { defaultCatQuery.awaitAsList() } returns emptyList()
@@ -517,9 +519,21 @@ class SyncMergerTest {
         merger.merge(payload)
 
         // Must NOT insert new manga
-        coVerify(exactly = 0) { syncQueries.insertSyncManga(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) {
+            syncQueries.insertSyncManga(
+                any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), any(), any(), any(),
+            )
+        }
         // Must update the matched local manga
-        coVerify(exactly = 1) { syncQueries.updateSyncMangaFavorite(id = 42L, userFavoriteAt = any(), favoriteModifiedAt = any(), lastModifiedAt = any()) }
+        coVerify(exactly = 1) {
+            syncQueries.updateSyncMangaFavorite(
+                id = 42L,
+                userFavoriteAt = any(),
+                favoriteModifiedAt = any(),
+                lastModifiedAt = any(),
+            )
+        }
     }
 
     @Test
@@ -550,9 +564,21 @@ class SyncMergerTest {
         merger.merge(payload)
 
         // Must NOT insert new manga
-        coVerify(exactly = 0) { syncQueries.insertSyncManga(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) {
+            syncQueries.insertSyncManga(
+                any(), any(), any(), any(), any(), any(), any(), any(),
+                any(), any(), any(), any(), any(), any(), any(), any(),
+            )
+        }
         // Must update existing local manga
-        coVerify(exactly = 1) { syncQueries.updateSyncMangaFavorite(id = 77L, userFavoriteAt = any(), favoriteModifiedAt = any(), lastModifiedAt = any()) }
+        coVerify(exactly = 1) {
+            syncQueries.updateSyncMangaFavorite(
+                id = 77L,
+                userFavoriteAt = any(),
+                favoriteModifiedAt = any(),
+                lastModifiedAt = any(),
+            )
+        }
     }
 
     @Test
@@ -571,7 +597,9 @@ class SyncMergerTest {
 
         val duplicatesQuery = mockk<Query<GetDuplicateFavoritesForSourceAndTitle>>()
         coEvery { duplicatesQuery.awaitAsList() } returns listOf(duplicateManga)
-        every { syncQueries.getDuplicateFavoritesForSourceAndTitle(100L, "Duplicate Test", 10L) } returns duplicatesQuery
+        every {
+            syncQueries.getDuplicateFavoritesForSourceAndTitle(100L, "Duplicate Test", 10L)
+        } returns duplicatesQuery
 
         val payload = SyncPayload(
             mangas = listOf(
@@ -649,7 +677,11 @@ class SyncMergerTest {
                 lastModifiedAt = 2000L,
             )
         }
-        coVerify(exactly = 0) { syncQueries.insertSyncChapter(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) {
+            syncQueries.insertSyncChapter(
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+            )
+        }
     }
 
     @Test
@@ -710,7 +742,11 @@ class SyncMergerTest {
                 lastModifiedAt = 2000L,
             )
         }
-        coVerify(exactly = 0) { syncQueries.insertSyncChapter(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()) }
+        coVerify(exactly = 0) {
+            syncQueries.insertSyncChapter(
+                any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(),
+            )
+        }
     }
 
     @Test
