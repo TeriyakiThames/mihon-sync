@@ -10,15 +10,20 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
@@ -62,6 +67,7 @@ fun HistoryScreen(
     onDialogChange: (HistoryViewModel.Dialog?) -> Unit,
     isSyncing: Boolean = false,
     onClickSync: () -> Unit,
+    lazyListState: LazyListState = rememberLazyListState(),
 ) {
     Scaffold(
         topBar = { scrollBehavior ->
@@ -151,6 +157,8 @@ fun HistoryScreen(
                     onClickResume = { history -> onClickResume(history.mangaId, history.chapterId) },
                     onClickDelete = { item -> onDialogChange(HistoryViewModel.Dialog.Delete(item)) },
                     onClickFavorite = { history -> onClickFavorite(history.mangaId) },
+                    lazyListState = lazyListState,
+                    isSyncing = isSyncing,
                 )
             }
         }
@@ -165,6 +173,8 @@ private fun HistoryScreenContent(
     onClickResume: (HistoryWithRelations) -> Unit,
     onClickDelete: (HistoryWithRelations) -> Unit,
     onClickFavorite: (HistoryWithRelations) -> Unit,
+    lazyListState: LazyListState = rememberLazyListState(),
+    isSyncing: Boolean = false,
 ) {
     val context = LocalContext.current
     val locale = LocalLocale.current
@@ -174,7 +184,32 @@ private fun HistoryScreenContent(
         UiPreferences.timeFormat(timeFormat, locale.platformLocale, is24HourSystem)
     }
 
+    var wasSyncing by remember { mutableStateOf(false) }
+    var shouldScrollToTopOnUpdate by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isSyncing) {
+        if (isSyncing) {
+            wasSyncing = true
+        } else if (wasSyncing) {
+            wasSyncing = false
+            shouldScrollToTopOnUpdate = true
+            if (history.isNotEmpty()) {
+                lazyListState.animateScrollToItem(0)
+            }
+        }
+    }
+
+    LaunchedEffect(history) {
+        if (shouldScrollToTopOnUpdate) {
+            shouldScrollToTopOnUpdate = false
+            if (history.isNotEmpty()) {
+                lazyListState.animateScrollToItem(0)
+            }
+        }
+    }
+
     FastScrollLazyColumn(
+        state = lazyListState,
         contentPadding = contentPadding,
     ) {
         items(

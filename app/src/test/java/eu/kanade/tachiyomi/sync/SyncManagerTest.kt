@@ -76,7 +76,9 @@ class SyncManagerTest {
         coEvery { apiClient.pushUpdate(any(), any()) } returns SyncUpdateResponse(success = true, timestamp = 1000L)
         coEvery { diffEngine.extractDiff(any()) } returns SyncPayload()
         coEvery { diffEngine.clearLastExtractedDirty() } returns Unit
-        coEvery { merger.merge(any()) } returns Unit
+        every { merger.consolidate(any()) } answers { firstArg<List<SyncPayload>>().firstOrNull() ?: SyncPayload() }
+        coEvery { merger.merge(any<SyncPayload>()) } returns Unit
+        coEvery { merger.merge(any<List<SyncPayload>>()) } returns Unit
 
         syncManager = SyncManager(syncPreferences, diffEngine, merger, apiClient)
     }
@@ -187,7 +189,7 @@ class SyncManagerTest {
         val success = syncManager.syncNow(force = true)
 
         assertTrue(success)
-        coVerify(exactly = 1) { merger.merge(any()) }
+        coVerify(exactly = 1) { merger.merge(any<SyncPayload>()) }
     }
 
     @Test
@@ -282,5 +284,36 @@ class SyncManagerTest {
         val success = syncManager.pullFromOrigin()
         assertFalse(success)
         assertFalse(syncManager.isSyncing.value)
+    }
+
+    @Test
+    fun `internalPull batches multiple updates into a single consolidated merge`() = runBlocking {
+        val key = encryptionKeyPref.get()
+        val update1 = SyncUpdateRecord(
+            id = "up-1",
+            timestamp = 1000L,
+            deviceId = "device2",
+            payload = CryptoUtil.encryptString("{}", key),
+        )
+        val update2 = SyncUpdateRecord(
+            id = "up-2",
+            timestamp = 2000L,
+            deviceId = "device2",
+            payload = CryptoUtil.encryptString("{}", key),
+        )
+
+        coEvery { apiClient.pullUpdates(sinceTimestamp = 0L) } returns SyncUpdatesResponse(
+            updates = listOf(update1, update2),
+        )
+
+        val success = syncManager.pullFromOrigin()
+
+        assertTrue(success)
+        io.mockk.verify(exactly = 1) {
+            merger.consolidate(match { it.size == 2 })
+        }
+        coVerify(exactly = 1) {
+            merger.merge(any<SyncPayload>())
+        }
     }
 }

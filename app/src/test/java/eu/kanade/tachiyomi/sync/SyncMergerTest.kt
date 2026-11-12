@@ -236,8 +236,8 @@ class SyncMergerTest {
             )
         }
 
-        coVerify(exactly = 1) { syncQueries.resetAllChapterIsSyncing() }
-        coVerify(exactly = 1) { syncQueries.resetAllMangaIsSyncing() }
+        coVerify(exactly = 1) { syncQueries.resetChapterIsSyncingByIds(listOf(10L)) }
+        coVerify(exactly = 1) { syncQueries.resetMangaIsSyncingByIds(listOf(1L)) }
     }
 
     @Test
@@ -772,5 +772,213 @@ class SyncMergerTest {
         coVerify(exactly = 0) {
             syncQueries.insertCategory(name = "", any(), any())
         }
+    }
+
+    @Test
+    fun `consolidate deduplicates overlapping history keeping maximum duration and latest readAt`() {
+        val payload1 = SyncPayload(
+            history = listOf(
+                HistorySyncRecord(
+                    mangaSource = 1L,
+                    mangaUrl = "/manga/1",
+                    chapterUrl = "/ch/1",
+                    lastRead = 1000L,
+                    timeRead = 50L,
+                ),
+            ),
+        )
+        val payload2 = SyncPayload(
+            history = listOf(
+                HistorySyncRecord(
+                    mangaSource = 1L,
+                    mangaUrl = "/manga/1",
+                    chapterUrl = "/ch/1",
+                    lastRead = 2000L,
+                    timeRead = 120L,
+                ),
+            ),
+        )
+
+        val consolidated = merger.consolidate(listOf(payload1, payload2))
+
+        org.junit.jupiter.api.Assertions.assertEquals(1, consolidated.history.size)
+        val h = consolidated.history.first()
+        org.junit.jupiter.api.Assertions.assertEquals(2000L, h.lastRead)
+        org.junit.jupiter.api.Assertions.assertEquals(120L, h.timeRead)
+    }
+
+    @Test
+    fun `consolidate deduplicates overlapping chapters keeping latest modified record`() {
+        val payload1 = SyncPayload(
+            chapters = listOf(
+                ChapterSyncRecord(
+                    mangaSource = 1L,
+                    mangaUrl = "/manga/1",
+                    chapterUrl = "/ch/1",
+                    read = false,
+                    bookmark = false,
+                    lastPageRead = 5L,
+                    lastModifiedAt = 1000L,
+                ),
+            ),
+        )
+        val payload2 = SyncPayload(
+            chapters = listOf(
+                ChapterSyncRecord(
+                    mangaSource = 1L,
+                    mangaUrl = "/manga/1",
+                    chapterUrl = "/ch/1",
+                    read = true,
+                    bookmark = true,
+                    lastPageRead = 25L,
+                    lastModifiedAt = 2000L,
+                ),
+            ),
+        )
+
+        val consolidated = merger.consolidate(listOf(payload1, payload2))
+
+        org.junit.jupiter.api.Assertions.assertEquals(1, consolidated.chapters.size)
+        val ch = consolidated.chapters.first()
+        org.junit.jupiter.api.Assertions.assertTrue(ch.read)
+        org.junit.jupiter.api.Assertions.assertTrue(ch.bookmark)
+        org.junit.jupiter.api.Assertions.assertEquals(25L, ch.lastPageRead)
+        org.junit.jupiter.api.Assertions.assertEquals(2000L, ch.lastModifiedAt)
+    }
+
+    @Test
+    fun `consolidate deduplicates overlapping mangas and categories`() {
+        val payload1 = SyncPayload(
+            mangas = listOf(
+                MangaSyncRecord(
+                    source = 1L,
+                    url = "/manga/1",
+                    title = "Title",
+                    favorite = true,
+                    favoriteModifiedAt = 1000L,
+                    lastModifiedAt = 1000L,
+                    categories = listOf("Action"),
+                ),
+            ),
+            categories = listOf(
+                CategorySyncRecord(name = "Action", order = 1L, flags = 0L),
+            ),
+        )
+        val payload2 = SyncPayload(
+            mangas = listOf(
+                MangaSyncRecord(
+                    source = 1L,
+                    url = "/manga/1",
+                    title = "Title",
+                    favorite = false,
+                    favoriteModifiedAt = 2000L,
+                    lastModifiedAt = 2000L,
+                    categories = listOf("Action", "Drama"),
+                ),
+            ),
+            categories = listOf(
+                CategorySyncRecord(name = "Action", order = 2L, flags = 1L),
+            ),
+        )
+
+        val consolidated = merger.consolidate(listOf(payload1, payload2))
+
+        org.junit.jupiter.api.Assertions.assertEquals(1, consolidated.mangas.size)
+        val m = consolidated.mangas.first()
+        org.junit.jupiter.api.Assertions.assertFalse(m.favorite)
+        org.junit.jupiter.api.Assertions.assertEquals(2000L, m.favoriteModifiedAt)
+        org.junit.jupiter.api.Assertions.assertEquals(listOf("Action", "Drama"), m.categories)
+
+        org.junit.jupiter.api.Assertions.assertEquals(1, consolidated.categories.size)
+        val cat = consolidated.categories.first()
+        org.junit.jupiter.api.Assertions.assertEquals(2L, cat.order)
+        org.junit.jupiter.api.Assertions.assertEquals(1L, cat.flags)
+    }
+
+    @Test
+    fun `merge with in-memory caching does not re-query database for same manga and chapter`() = runBlocking {
+        val localManga = Manga(
+            id = 1L,
+            source_id = 100L,
+            remote_url = "/manga/1",
+            remote_title = "Test Manga",
+            remote_author = null,
+            remote_artist = null,
+            remote_description = null,
+            remote_genre = null,
+            remote_status = 1L,
+            remote_cover = null,
+            remote_update_strategy = UpdateStrategy.ALWAYS_UPDATE,
+            remote_memo = JsonObject(emptyMap()),
+            user_favorite_at = null,
+            user_notes = "",
+            user_reader_flags = 0L,
+            user_chapter_flags = 0L,
+            state_chapter_last_update = null,
+            state_chapter_next_update = null,
+            state_chapter_fetch_interval = 0L,
+            state_cover_last_modified = null,
+            state_initialized = true,
+            is_syncing = 0L,
+            is_dirty = 0L,
+            last_modified_at = 1000L,
+            favorite_modified_at = 1000L,
+        )
+
+        val localChapter = Chapter(
+            id = 10L,
+            manga_id = 1L,
+            remote_url = "/chapter/1",
+            remote_name = "Chapter 1",
+            remote_scanlator = null,
+            remote_chapter_number = 1.0,
+            remote_date_upload = null,
+            remote_order = 0L,
+            remote_memo = JsonObject(emptyMap()),
+            user_read = false,
+            user_bookmark = false,
+            user_last_page_read = 5,
+            state_date_fetch = Instant.fromEpochMilliseconds(0L),
+            is_syncing = 0L,
+            is_dirty = 0L,
+            last_modified_at = 1000L,
+        )
+
+        val mangaQuery = mockk<Query<Manga>>()
+        coEvery { mangaQuery.awaitAsOneOrNull() } returns localManga
+        every { syncQueries.getMangaBySourceAndUrl(100L, "/manga/1") } returns mangaQuery
+
+        val chapterQuery = mockk<Query<Chapter>>()
+        coEvery { chapterQuery.awaitAsOneOrNull() } returns localChapter
+        every { syncQueries.getChapterByMangaIdAndUrl(1L, "/chapter/1") } returns chapterQuery
+
+        val historyQuery = mockk<Query<GetHistoryByChapterId>>()
+        coEvery { historyQuery.awaitAsOneOrNull() } returns null
+        every { syncQueries.getHistoryByChapterId(10L) } returns historyQuery
+
+        val payload = SyncPayload(
+            history = listOf(
+                HistorySyncRecord(
+                    mangaSource = 100L,
+                    mangaUrl = "/manga/1",
+                    chapterUrl = "/chapter/1",
+                    lastRead = 1000L,
+                    timeRead = 10L,
+                ),
+                HistorySyncRecord(
+                    mangaSource = 100L,
+                    mangaUrl = "/manga/1",
+                    chapterUrl = "/chapter/1",
+                    lastRead = 2000L,
+                    timeRead = 20L,
+                ),
+            ),
+        )
+
+        merger.merge(payload)
+
+        // Thanks to in-memory caching, the database is queried only once for manga and chapter
+        coVerify(exactly = 1) { mangaQuery.awaitAsOneOrNull() }
+        coVerify(exactly = 1) { chapterQuery.awaitAsOneOrNull() }
     }
 }

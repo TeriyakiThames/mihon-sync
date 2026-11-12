@@ -243,7 +243,8 @@ class SyncManager(
                 }
             }
 
-            // Merge incremental updates
+            // Collect incremental updates in batch
+            val remotePayloads = mutableListOf<SyncPayload>()
             for (update in pullResponse.updates) {
                 if (update.timestamp > maxObservedTimestamp) {
                     maxObservedTimestamp = update.timestamp
@@ -256,11 +257,17 @@ class SyncManager(
                 try {
                     val decryptedJson = CryptoUtil.decryptString(update.payload, encryptionKey)
                     val remotePayload = json.decodeFromString<SyncPayload>(decryptedJson)
-                    merger.merge(remotePayload)
+                    remotePayloads.add(remotePayload)
                 } catch (e: Exception) {
                     logcat(LogPriority.ERROR, e) { "Failed to decrypt or merge sync update ${update.id}" }
                     throw e
                 }
+            }
+
+            // Merge all incremental updates in a single consolidated batch
+            if (remotePayloads.isNotEmpty()) {
+                val consolidatedPayload = merger.consolidate(remotePayloads)
+                merger.merge(consolidatedPayload)
             }
 
             // Commit pull watermark after successfully merged batch
