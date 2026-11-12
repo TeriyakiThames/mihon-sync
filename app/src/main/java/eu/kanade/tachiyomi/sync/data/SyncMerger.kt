@@ -381,16 +381,12 @@ class SyncMerger(
                 modifiedChapterIds.chunked(500).forEach { chunk ->
                     database.syncQueries.resetChapterIsSyncingByIds(chunk)
                 }
-            } else {
-                database.syncQueries.resetAllChapterIsSyncing()
             }
 
             if (modifiedMangaIds.isNotEmpty()) {
                 modifiedMangaIds.chunked(500).forEach { chunk ->
                     database.syncQueries.resetMangaIsSyncingByIds(chunk)
                 }
-            } else {
-                database.syncQueries.resetAllMangaIsSyncing()
             }
         }
     }
