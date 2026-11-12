@@ -78,6 +78,12 @@ We selected **Option A (Outbox Dirty Tracking)** alongside refined lifecycle and
 - `SyncManager` exposes `isSyncing: StateFlow<Boolean>` that transitions to `true` whenever `syncMutex` is acquired for pull or push operations and resets to `false` in a `finally` block upon completion or failure.
 - Screens consuming sync state (`HistoryTab`, `SettingsSyncScreen`) observe `isSyncing` via `collectAsStateWithLifecycle()`, providing real-time feedback (such as a spinning refresh icon and an indeterminate `LinearProgressIndicator` in the top bar) during both automated background pulls and manual sync actions.
 
+### 4.6 Batch Consolidation, In-Memory Caching & Targeted Loop Suppression
+- **Incremental Batch Consolidation**: When catching up after being offline or lagging behind, `SyncManager.internalPull()` decodes and consolidates multiple remote update payloads via `SyncMerger.consolidate()` into a single deduplicated payload per page batch. Overlapping history entries take `maxOf(lastRead)` and `maxOf(timeRead)`, overlapping chapters preserve the newest `lastModifiedAt`, and categories/mangas reconcile to their latest modification timestamps.
+- **Single Transaction Per Batch**: Merging an entire batch within a single SQLite transaction minimizes fsync/disk commit latency from hundreds of disk commits down to one per batch, and avoids thrashing reactive UI observers (`getHistory.subscribe()`).
+- **In-Memory Natural Key Caching**: `SyncMerger` caches manga and chapter natural key lookups during the merge lifecycle, eliminating repeated SQLite table queries for the same manga/chapter records.
+- **Targeted `is_syncing` Flag Resets**: Rather than running full-table scans on `chapter` and `manga` (`WHERE is_syncing != 0`) after every update, `SyncMerger` tracks the exact primary keys of touched records and resets `is_syncing = 0` via targeted indexed queries (`WHERE id IN :ids`).
+
 ---
 
 ## 5. Consequences
@@ -88,6 +94,7 @@ We selected **Option A (Outbox Dirty Tracking)** alongside refined lifecycle and
 - **No Echo Loops**: Server receives only genuinely local modifications.
 - **Improved UX**: Users can unmark read, re-read chapters, and trust category organization across all devices.
 - **Real-Time Sync Transparency**: Users are visibly informed via live indicators whenever background reconciliation or pushes are actively underway.
+- **Instant Catch-up Synchronization**: Catching up from long periods of disconnection completes in sub-seconds rather than multiple minutes, eliminating UI thread starvation and repetitive database transactions.
 
 ### Negative / Maintenance
 - Schema migration required to add `is_dirty` columns to existing SQLite tables.

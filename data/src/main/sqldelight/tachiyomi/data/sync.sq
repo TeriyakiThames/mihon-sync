@@ -240,6 +240,18 @@ UPDATE manga
 SET is_syncing = :isSyncing
 WHERE id = :mangaId;
 
+-- Reset is_syncing on specific chapters
+resetChapterIsSyncingByIds:
+UPDATE chapter
+SET is_syncing = 0
+WHERE id IN :chapterIds;
+
+-- Reset is_syncing on specific mangas
+resetMangaIsSyncingByIds:
+UPDATE manga
+SET is_syncing = 0
+WHERE id IN :mangaIds;
+
 -- Reset is_syncing on all chapters
 resetAllChapterIsSyncing:
 UPDATE chapter
