@@ -185,24 +185,21 @@ private fun HistoryScreenContent(
     }
 
     var wasSyncing by remember { mutableStateOf(false) }
-    var shouldScrollToTopOnUpdate by remember { mutableStateOf(false) }
+    var pendingScrollToTop by remember { mutableStateOf(false) }
 
     LaunchedEffect(isSyncing) {
         if (isSyncing) {
             wasSyncing = true
         } else if (wasSyncing) {
             wasSyncing = false
-            shouldScrollToTopOnUpdate = true
-            if (history.isNotEmpty()) {
-                lazyListState.animateScrollToItem(0)
-            }
+            pendingScrollToTop = true
         }
     }
 
-    LaunchedEffect(history) {
-        if (shouldScrollToTopOnUpdate) {
-            shouldScrollToTopOnUpdate = false
-            if (history.isNotEmpty()) {
+    LaunchedEffect(history, pendingScrollToTop) {
+        if (pendingScrollToTop && history.isNotEmpty()) {
+            pendingScrollToTop = false
+            if (lazyListState.firstVisibleItemIndex > 0 || lazyListState.firstVisibleItemScrollOffset > 0) {
                 lazyListState.animateScrollToItem(0)
             }
         }
@@ -214,7 +211,12 @@ private fun HistoryScreenContent(
     ) {
         items(
             items = history,
-            key = { "history-${it.hashCode()}" },
+            key = {
+                when (it) {
+                    is HistoryUiModel.Header -> "historyHeader-${it.date}"
+                    is HistoryUiModel.Item -> "history-${it.item.mangaId}"
+                }
+            },
             contentType = {
                 when (it) {
                     is HistoryUiModel.Header -> "header"

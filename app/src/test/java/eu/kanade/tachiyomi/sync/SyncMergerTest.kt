@@ -80,7 +80,7 @@ class SyncMergerTest {
     }
 
     @Test
-    fun `merge wraps operations in database transaction and resets is_syncing flags`() = runBlocking {
+    fun `merge wraps operations in database transaction and avoids full table scans on empty payload`() = runBlocking {
         var transactionExecuted = false
         coEvery { database.transaction(any(), any()) } coAnswers {
             transactionExecuted = true
@@ -98,8 +98,10 @@ class SyncMergerTest {
         merger.merge(emptyPayload)
 
         assertTrue(transactionExecuted, "merge operations must be executed inside database.transaction")
-        coVerify(exactly = 1) { syncQueries.resetAllChapterIsSyncing() }
-        coVerify(exactly = 1) { syncQueries.resetAllMangaIsSyncing() }
+        coVerify(exactly = 0) { syncQueries.resetAllChapterIsSyncing() }
+        coVerify(exactly = 0) { syncQueries.resetAllMangaIsSyncing() }
+        coVerify(exactly = 0) { syncQueries.resetChapterIsSyncingByIds(any()) }
+        coVerify(exactly = 0) { syncQueries.resetMangaIsSyncingByIds(any()) }
     }
 
     @Test

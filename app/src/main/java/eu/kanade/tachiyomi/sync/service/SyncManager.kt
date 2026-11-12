@@ -11,6 +11,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -244,24 +247,28 @@ class SyncManager(
             }
 
             // Collect incremental updates in batch
-            val remotePayloads = mutableListOf<SyncPayload>()
             for (update in pullResponse.updates) {
                 if (update.timestamp > maxObservedTimestamp) {
                     maxObservedTimestamp = update.timestamp
                 }
+            }
 
-                if (!update.deviceId.isNullOrBlank() && update.deviceId == currentDevice) {
-                    continue
-                }
+            val eligibleUpdates = pullResponse.updates.filter {
+                it.deviceId.isNullOrBlank() || it.deviceId != currentDevice
+            }
 
-                try {
-                    val decryptedJson = CryptoUtil.decryptString(update.payload, encryptionKey)
-                    val remotePayload = json.decodeFromString<SyncPayload>(decryptedJson)
-                    remotePayloads.add(remotePayload)
-                } catch (e: Exception) {
-                    logcat(LogPriority.ERROR, e) { "Failed to decrypt or merge sync update ${update.id}" }
-                    throw e
-                }
+            val remotePayloads = coroutineScope {
+                eligibleUpdates.map { update ->
+                    async(Dispatchers.Default) {
+                        try {
+                            val decryptedJson = CryptoUtil.decryptString(update.payload, encryptionKey)
+                            json.decodeFromString<SyncPayload>(decryptedJson)
+                        } catch (e: Exception) {
+                            logcat(LogPriority.ERROR, e) { "Failed to decrypt or merge sync update ${update.id}" }
+                            throw e
+                        }
+                    }
+                }.awaitAll()
             }
 
             // Merge all incremental updates in a single consolidated batch
