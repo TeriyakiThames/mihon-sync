@@ -958,8 +958,20 @@ class SyncMergerTest {
 
         val payload = SyncPayload(
             history = listOf(
-                HistorySyncRecord(mangaSource = 100L, mangaUrl = "/manga/1", chapterUrl = "/chapter/1", lastRead = 1000L, timeRead = 10L),
-                HistorySyncRecord(mangaSource = 100L, mangaUrl = "/manga/1", chapterUrl = "/chapter/1", lastRead = 2000L, timeRead = 20L),
+                HistorySyncRecord(
+                    mangaSource = 100L,
+                    mangaUrl = "/manga/1",
+                    chapterUrl = "/chapter/1",
+                    lastRead = 1000L,
+                    timeRead = 10L,
+                ),
+                HistorySyncRecord(
+                    mangaSource = 100L,
+                    mangaUrl = "/manga/1",
+                    chapterUrl = "/chapter/1",
+                    lastRead = 2000L,
+                    timeRead = 20L,
+                ),
             ),
         )
 

@@ -60,7 +60,11 @@ class SyncMerger(
                     val effectiveDateAdded = if (manga.dateAdded > 0) manga.dateAdded else existing.dateAdded
                     val effectiveFavMod = maxOf(existingFavMod, newFavMod)
                     val effectiveLastMod = maxOf(existing.lastModifiedAt, manga.lastModifiedAt)
-                    val effectiveCategories = if (manga.categories.isNotEmpty()) manga.categories else existing.categories
+                    val effectiveCategories = if (manga.categories.isNotEmpty()) {
+                        manga.categories
+                    } else {
+                        existing.categories
+                    }
 
                     mangasMap[key] = manga.copy(
                         favorite = effectiveFavorite,
@@ -204,7 +208,9 @@ class SyncMerger(
                     ).awaitAsOne()
                     modifiedMangaIds.add(targetMangaId)
 
-                    val insertedManga = database.syncQueries.getMangaBySourceAndUrl(remoteManga.source, remoteManga.url).awaitAsOneOrNull()
+                    val insertedManga = database.syncQueries
+                        .getMangaBySourceAndUrl(remoteManga.source, remoteManga.url)
+                        .awaitAsOneOrNull()
                     mangaCache[remoteManga.source to remoteManga.url] = insertedManga
 
                     // Associate categories for the newly inserted manga
@@ -276,7 +282,11 @@ class SyncMerger(
 
             // 3. Merge Chapters
             for (remoteChapter in remotePayload.chapters) {
-                val localManga = findLocalManga(remoteChapter.mangaSource, remoteChapter.mangaUrl, mangaCache = mangaCache) ?: continue
+                val localManga = findLocalManga(
+                    source = remoteChapter.mangaSource,
+                    url = remoteChapter.mangaUrl,
+                    mangaCache = mangaCache,
+                ) ?: continue
 
                 val localChapter = findLocalChapter(
                     mangaId = localManga.id,
@@ -300,7 +310,9 @@ class SyncMerger(
                         lastModifiedAt = remoteChapter.lastModifiedAt,
                     ).awaitAsOne()
                     modifiedChapterIds.add(newChapterId)
-                    val insertedChapter = database.syncQueries.getChapterByMangaIdAndUrl(localManga.id, remoteChapter.chapterUrl).awaitAsOneOrNull()
+                    val insertedChapter = database.syncQueries
+                        .getChapterByMangaIdAndUrl(localManga.id, remoteChapter.chapterUrl)
+                        .awaitAsOneOrNull()
                     chapterCache[localManga.id to remoteChapter.chapterUrl] = insertedChapter
                 } else {
                     val isRemoteNewer = remoteChapter.lastModifiedAt > localChapter.last_modified_at
@@ -334,9 +346,17 @@ class SyncMerger(
 
             // 4. Merge Reading History
             for (remoteHistory in remotePayload.history) {
-                val localManga = findLocalManga(remoteHistory.mangaSource, remoteHistory.mangaUrl, mangaCache = mangaCache) ?: continue
+                val localManga = findLocalManga(
+                    source = remoteHistory.mangaSource,
+                    url = remoteHistory.mangaUrl,
+                    mangaCache = mangaCache,
+                ) ?: continue
 
-                val localChapter = findLocalChapter(localManga.id, remoteHistory.chapterUrl, chapterCache = chapterCache) ?: continue
+                val localChapter = findLocalChapter(
+                    mangaId = localManga.id,
+                    chapterUrl = remoteHistory.chapterUrl,
+                    chapterCache = chapterCache,
+                ) ?: continue
 
                 val localHistory = database.syncQueries
                     .getHistoryByChapterId(localChapter.id)

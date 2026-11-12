@@ -118,3 +118,26 @@ The pairing URI encodes credentials for sharing between devices:
 mihon-sync://pair?serverUrl=<url_encoded_server>&roomId=<room_id>&key=<base64_aes_key>
 ```
 Handled by `SyncPairingUtil.createPairingUri()` and `SyncPairingUtil.parsePairingUri()`.
+
+---
+
+## 6. Code Style & CI Verification Rules
+
+To prevent CI build and test failures in GitHub Actions:
+1. **Spotless & Ktlint Compliance**:
+   CI strictly enforces code formatting via `./gradlew spotlessCheck`.
+   Before committing, agents **MUST** execute:
+   ```bash
+   ./gradlew spotlessApply
+   ./gradlew spotlessCheck
+   ```
+2. **Strict 120-Character Line Limit**:
+   Ktlint enforces a hard maximum line length of 120 characters (`standard:max-line-length`). Because `spotlessApply` cannot automatically wrap all long lines, agents must manually format and break lines exceeding 120 characters.
+3. **JVM Runtime Requirement**:
+   The Metro Gradle plugin and build toolchain require **Java 21+**. Always ensure `JAVA_HOME` points to a JDK 21+ installation when executing Gradle tasks.
+4. **Pre-Commit Verification**:
+   Always run unit tests and format checks before pushing:
+   ```bash
+   ./gradlew spotlessCheck
+   ./gradlew :app:testDebugUnitTest --tests "eu.kanade.tachiyomi.sync.*"
+   ```
